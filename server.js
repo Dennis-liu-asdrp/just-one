@@ -29,9 +29,30 @@ const state = {
 
 const sseClients = new Set();
 
+const HEARTBEAT_INTERVAL = 25000;
+setInterval(() => {
+  const tick = `:heartbeat ${Date.now()}\n\n`;
+  for (const client of Array.from(sseClients)) {
+    try {
+      client.write(tick);
+    } catch (err) {
+      sseClients.delete(client);
+      try {
+        client.end();
+      } catch (_) {}
+    }
+  }
+}, HEARTBEAT_INTERVAL).unref();
+
 const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
   const { pathname } = requestUrl;
+
+  if (pathname === '/healthz' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
 
   if (pathname === '/events' && req.method === 'GET') {
     handleSse(req, res);
@@ -105,15 +126,29 @@ function handleSse(req, res) {
 
 function broadcastState() {
   const payload = `data: ${JSON.stringify(serializeState())}\n\n`;
-  for (const client of sseClients) {
-    client.write(payload);
+  for (const client of Array.from(sseClients)) {
+    try {
+      client.write(payload);
+    } catch (err) {
+      sseClients.delete(client);
+      try {
+        client.end();
+      } catch (_) {}
+    }
   }
 }
 
 async function serveStatic(requestPath, res) {
   try {
     const rawPath = requestPath === '/' ? '/index.html' : requestPath;
-    const normalized = path.normalize(decodeURIComponent(rawPath));
+    let normalized;
+    try {
+      normalized = path.normalize(decodeURIComponent(rawPath));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Bad request');
+      return;
+    }
     const relativePath = normalized.replace(/^\/+/, '');
     const filePath = path.join(publicDir, relativePath);
     if (!filePath.startsWith(publicDir)) {
