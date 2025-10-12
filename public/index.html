@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Just One Online</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main>
+    <h1>Just One</h1>
+
+    <section id="join-section" class="panel">
+      <h2>Join the table</h2>
+      <form id="join-form">
+        <label>
+          <span>Name</span>
+          <input id="name-input" type="text" required maxlength="24" autocomplete="off" />
+        </label>
+        <label>
+          <span>Role</span>
+          <select id="role-select">
+            <option value="guesser">Guesser</option>
+            <option value="hint" selected>Hint giver</option>
+          </select>
+        </label>
+        <button type="submit">Join</button>
+      </form>
+      <p class="hint">There can be only one guesser at a time.</p>
+    </section>
+
+    <section id="game-section" class="panel hidden">
+      <div id="player-info"></div>
+
+      <div class="status-bar">
+        <div id="stage-indicator"></div>
+        <div id="scoreboard"></div>
+      </div>
+
+      <section id="share-panel" class="panel subtle hidden">
+        <h3>Invite others</h3>
+        <div class="share-row">
+          <input id="share-link" type="text" readonly />
+          <button type="button" id="copy-share">Copy</button>
+        </div>
+        <p class="hint" id="share-hint">Share this address with friends on your network.</p>
+      </section>
+
+      <section id="players"></section>
+
+      <section id="controls"></section>
+
+      <section id="round"></section>
+    </section>
+
+    <div id="messages"></div>
+  </main>
+
+  <template id="hint-list-template">
+    <ul class="hint-list"></ul>
+  </template>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
