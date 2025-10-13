@@ -28,29 +28,45 @@ init();
 function init() {
   joinForm.addEventListener('submit', handleJoinSubmit);
   copyShareButton.addEventListener('click', handleCopyShareLink);
-  restorePlayer();
+  window.addEventListener('beforeunload', handleBeforeUnload);
+  restorePlayer().catch(err => {
+    console.warn('Failed to restore player', err);
+  });
   openEventStream();
 }
 
-function restorePlayer() {
+async function restorePlayer() {
+  let stored = null;
   try {
-    const stored = JSON.parse(localStorage.getItem('just-one-player'));
-    if (stored && stored.id && stored.name && stored.role) {
-      player = stored;
-      nameInput.value = stored.name;
-      roleSelect.value = stored.role;
-      silentlyRejoin(stored).catch(() => {
-        // ignore errors; user may need to join again manually
-      });
-      updateLayout();
-    }
+    stored = JSON.parse(localStorage.getItem('just-one-player'));
   } catch (err) {
-    console.warn('Failed to restore player', err);
+    console.warn('Failed to read cached player', err);
   }
+
+  if (!stored || !stored.id || !stored.name || !stored.role) {
+    player = null;
+    updateLayout();
+    return;
+  }
+
+  nameInput.value = stored.name;
+  roleSelect.value = stored.role;
+
+  try {
+    const { player: refreshed } = await silentlyRejoin(stored);
+    player = refreshed;
+    localStorage.setItem('just-one-player', JSON.stringify(refreshed));
+  } catch (err) {
+    console.warn('Failed to restore session', err);
+    localStorage.removeItem('just-one-player');
+    player = null;
+  }
+
+  updateLayout();
 }
 
 async function silentlyRejoin(existing) {
-  await apiPost('/api/join', {
+  return apiPost('/api/join', {
     playerId: existing.id,
     name: existing.name,
     role: existing.role
@@ -77,6 +93,15 @@ function onStateChange() {
   const round = serverState?.round;
   const roundId = round?.id ?? null;
   const stage = round?.stage ?? null;
+
+  if (player && serverState && !serverState.players.some(p => p.id === player.id)) {
+    player = null;
+    localStorage.removeItem('just-one-player');
+    lastKnownRoundId = roundId;
+    lastKnownStage = stage;
+    updateLayout();
+    return;
+  }
 
   if (!round) {
     currentWord = null;
@@ -148,6 +173,10 @@ async function handleJoinSubmit(event) {
     showMessage('Pick a name first!', 'error');
     return;
   }
+  if (!role) {
+    showMessage('Choose a role before joining.', 'error');
+    return;
+  }
   const payload = { name, role };
   if (player?.id) {
     payload.playerId = player.id;
@@ -157,6 +186,7 @@ async function handleJoinSubmit(event) {
     const { player: joined } = await apiPost('/api/join', payload);
     player = joined;
     localStorage.setItem('just-one-player', JSON.stringify(joined));
+    roleSelect.value = joined.role;
     updateLayout();
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
@@ -168,6 +198,13 @@ function updateLayout() {
   if (!player) {
     joinSection.classList.remove('hidden');
     gameSection.classList.add('hidden');
+    playerInfo.innerHTML = '';
+    stageIndicator.textContent = '';
+    scoreboardEl.textContent = '';
+    playersEl.innerHTML = '';
+    controlsEl.innerHTML = '';
+    roundEl.innerHTML = '';
+    renderSharePanel();
     return;
   }
 
@@ -201,12 +238,54 @@ function renderSharePanel() {
 }
 
 function renderPlayerInfo() {
-  const lines = [];
-  lines.push(`<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`);
-  if (!serverState?.round) {
-    lines.push('Start a round to begin the fun.');
+  playerInfo.innerHTML = '';
+
+  if (!player) {
+    playerInfo.textContent = 'Enter a name and choose a role to join the table.';
+    return;
   }
-  playerInfo.innerHTML = lines.join('<br />');
+
+  const summary = document.createElement('div');
+  summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
+  playerInfo.appendChild(summary);
+
+  if (!serverState?.round) {
+    const prompt = document.createElement('div');
+    prompt.textContent = 'Start a round to begin the fun.';
+    playerInfo.appendChild(prompt);
+  }
+
+  const form = document.createElement('form');
+  form.className = 'identity-form';
+  form.innerHTML = `
+    <div class="form-field">
+      <label>
+        <span>Name</span>
+        <input type="text" name="name" maxlength="24" autocomplete="off" value="${escapeHtml(player.name)}" required />
+      </label>
+    </div>
+    <div class="form-field">
+      <label>
+        <span>Role</span>
+        <select name="role">
+          <option value="guesser"${player.role === 'guesser' ? ' selected' : ''}>Guesser</option>
+          <option value="hint"${player.role === 'hint' ? ' selected' : ''}>Hint giver</option>
+        </select>
+      </label>
+    </div>
+    <button type="submit">Update</button>
+  `;
+  form.addEventListener('submit', handleIdentitySubmit);
+  playerInfo.appendChild(form);
+
+  const actions = document.createElement('div');
+  actions.className = 'player-actions';
+  const leaveButton = document.createElement('button');
+  leaveButton.type = 'button';
+  leaveButton.textContent = 'Leave table';
+  leaveButton.addEventListener('click', handleLeaveTable);
+  actions.appendChild(leaveButton);
+  playerInfo.appendChild(actions);
 }
 
 function renderPlayers() {
@@ -534,6 +613,65 @@ async function handleCopyShareLink() {
     }
   } catch (err) {
     showMessage('Copy failed. You can copy the link manually.', 'error');
+  }
+}
+
+async function handleIdentitySubmit(event) {
+  event.preventDefault();
+  if (!player) return;
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const name = (formData.get('name') || '').toString().trim();
+  const role = formData.get('role');
+  if (!name) {
+    showMessage('Name cannot be empty.', 'error');
+    return;
+  }
+  if (!role) {
+    showMessage('Select a role.', 'error');
+    return;
+  }
+  try {
+    const { player: updated } = await apiPost('/api/join', {
+      playerId: player.id,
+      name,
+      role
+    });
+    player = updated;
+    localStorage.setItem('just-one-player', JSON.stringify(updated));
+    nameInput.value = updated.name;
+    roleSelect.value = updated.role;
+    showMessage('Profile updated.');
+    updateLayout();
+  } catch (err) {
+    // handled by apiPost
+  }
+}
+
+async function handleLeaveTable() {
+  if (!player) return;
+  const leavingId = player.id;
+  try {
+    await apiPost('/api/player/leave', { playerId: leavingId }, { silent: true });
+  } catch (err) {
+    console.warn('Failed to notify leave', err);
+  }
+  localStorage.removeItem('just-one-player');
+  player = null;
+  nameInput.value = '';
+  roleSelect.value = '';
+  updateLayout();
+  showMessage('You left the table.');
+}
+
+function handleBeforeUnload() {
+  if (!player?.id || !navigator.sendBeacon) return;
+  try {
+    const payload = JSON.stringify({ playerId: player.id });
+    const blob = new Blob([payload], { type: 'application/json' });
+    navigator.sendBeacon('/api/player/leave', blob);
+  } catch (err) {
+    // ignore; page is closing
   }
 }
 

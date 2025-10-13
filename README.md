@@ -18,6 +18,8 @@ Lightweight Node.js implementation of the party game *Just One* for a single sha
 - Share the link displayed under **Invite others** in the app.
 - If friends are on the same Wi‑Fi/LAN, replace `localhost` with your machine's IP address, for example `http://192.168.1.42:3000/`.
 - Ensure your firewall allows inbound connections on port 3000.
+- Each browser tab/device should pick a unique name. Use **Leave table** inside the app to free up your seat before switching browsers or roles.
+- On Render (or similar hosts), point your health check to `/healthz` so the platform knows the server is ready.
 
 Everyone who opens that URL can join the table by entering a name and selecting whether they are the guesser or a hint giver.
 

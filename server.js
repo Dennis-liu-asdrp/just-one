@@ -70,6 +70,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/player/leave' && req.method === 'POST') {
+    await handleLeave(req, res);
+    return;
+  }
+
   if (pathname === '/api/round/start' && req.method === 'POST') {
     await handleStartRound(req, res);
     return;
@@ -223,6 +228,7 @@ async function handleJoin(req, res) {
       }
       player.name = name;
       player.role = role;
+      player.lastSeenAt = Date.now();
     } else {
       if (role === 'guesser' && roleIsTaken('guesser')) {
         respond(res, 409, { error: 'A guesser is already active' });
@@ -232,7 +238,8 @@ async function handleJoin(req, res) {
         id: randomUUID(),
         name,
         role,
-        joinedAt: Date.now()
+        joinedAt: Date.now(),
+        lastSeenAt: Date.now()
       };
       state.players.push(player);
     }
@@ -256,6 +263,7 @@ async function handleStartRound(req, res) {
       respond(res, 401, { error: 'Unknown player' });
       return;
     }
+    touchPlayer(player);
 
     if (!state.players.some(p => p.role === 'guesser')) {
       respond(res, 400, { error: 'Add a guesser before starting' });
@@ -305,6 +313,7 @@ async function handleSubmitHint(req, res) {
       respond(res, 401, { error: 'Unknown player' });
       return;
     }
+    touchPlayer(player);
 
     if (player.role !== 'hint') {
       respond(res, 403, { error: 'Only hint-givers can submit hints' });
@@ -358,6 +367,7 @@ async function handleBeginReview(req, res) {
       respond(res, 401, { error: 'Unknown player' });
       return;
     }
+    touchPlayer(player);
     if (player.role !== 'hint') {
       respond(res, 403, { error: 'Only hint-givers can begin review' });
       return;
@@ -385,6 +395,7 @@ async function handleReveal(req, res) {
       respond(res, 401, { error: 'Unknown player' });
       return;
     }
+    touchPlayer(player);
     if (player.role !== 'hint') {
       respond(res, 403, { error: 'Only hint-givers can reveal clues' });
       return;
@@ -413,6 +424,7 @@ async function handleGuess(req, res) {
       respond(res, 401, { error: 'Unknown player' });
       return;
     }
+    touchPlayer(player);
     if (player.role !== 'guesser') {
       respond(res, 403, { error: 'Only the guesser can submit guesses' });
       return;
@@ -460,6 +472,7 @@ async function handleMarkHint(req, res, hintId) {
       respond(res, 401, { error: 'Unknown player' });
       return;
     }
+    touchPlayer(player);
     if (player.role !== 'hint') {
       respond(res, 403, { error: 'Only hint-givers can mark hints' });
       return;
@@ -494,12 +507,34 @@ async function handleGetWord(req, res, params) {
       respond(res, 401, { error: 'Unknown player' });
       return;
     }
+    touchPlayer(player);
     if (player.role !== 'hint') {
       respond(res, 403, { error: 'Only hint-givers can view the word' });
       return;
     }
 
     respond(res, 200, { word: state.round.word });
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
+async function handleLeave(req, res) {
+  try {
+    const body = await readBody(req);
+    const playerId = body.playerId;
+    if (!playerId) {
+      respond(res, 400, { error: 'Player ID is required' });
+      return;
+    }
+    const player = findPlayer(playerId);
+    if (!player) {
+      respond(res, 200, { success: true });
+      return;
+    }
+    removePlayer(playerId);
+    respond(res, 200, { success: true });
+    broadcastState();
   } catch (err) {
     respond(res, 400, { error: err.message });
   }
@@ -512,6 +547,31 @@ function respond(res, status, payload) {
 
 function findPlayer(playerId) {
   return state.players.find(p => p.id === playerId);
+}
+
+function removePlayer(playerId) {
+  state.players = state.players.filter(p => p.id !== playerId);
+  if (state.round) {
+    state.round.hints = state.round.hints.filter(h => h.playerId !== playerId);
+    if (state.round.guess && state.round.guess.playerId === playerId) {
+      state.round.guess = null;
+    }
+    // If the sole guesser left during an active round, end the round early.
+    if (state.round.stage !== 'round_result') {
+      const hasGuesser = state.players.some(p => p.role === 'guesser');
+      if (!hasGuesser) {
+        state.round.stage = 'round_result';
+        state.round.finishedAt = Date.now();
+        state.round.guess = null;
+      }
+    }
+  }
+}
+
+function touchPlayer(player) {
+  if (player) {
+    player.lastSeenAt = Date.now();
+  }
 }
 
 function pickWord() {
