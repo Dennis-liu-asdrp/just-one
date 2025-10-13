@@ -29,7 +29,7 @@ const state = {
 
 const sseClients = new Set();
 
-const HEARTBEAT_INTERVAL = 25000;
+const HEARTBEAT_INTERVAL = 10000;
 setInterval(() => {
   const tick = `:heartbeat ${Date.now()}\n\n`;
   for (const client of Array.from(sseClients)) {
@@ -113,13 +113,19 @@ function handleSse(req, res) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
+    'Access-Control-Allow-Origin': '*',
+    'X-Accel-Buffering': 'no'
   });
 
+  res.write(':connected\n\n');
   res.write(`data: ${JSON.stringify(serializeState())}\n\n`);
   sseClients.add(res);
 
   req.on('close', () => {
+    sseClients.delete(res);
+  });
+
+  req.on('error', () => {
     sseClients.delete(res);
   });
 }
@@ -553,6 +559,10 @@ function serializeState() {
     score: state.score
   };
 }
+
+server.keepAliveTimeout = 75000;
+server.headersTimeout = 80000;
+server.requestTimeout = 0;
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
