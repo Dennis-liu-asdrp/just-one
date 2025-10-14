@@ -330,11 +330,10 @@ function renderControls() {
 
   const round = serverState.round;
   if (!round) {
-    if (player.role === 'hint') {
-      controlsEl.appendChild(buildButton('Start new round', () => startRound()));
-    } else {
-      controlsEl.textContent = 'Waiting for a hint giver to start the first round.';
-    }
+    const prompt = document.createElement('div');
+    prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
+    controlsEl.appendChild(prompt);
+    controlsEl.appendChild(buildButton('Start new round', () => startRound()));
     return;
   }
 
@@ -380,13 +379,13 @@ function renderControls() {
         controlsEl.textContent = 'Waiting for the guesser to decide.';
       }
       break;
-    case 'round_result':
-      if (player.role === 'hint') {
-        controlsEl.appendChild(buildButton('Start next round', () => startRound()));
-      } else {
-        controlsEl.textContent = 'Review the result and ask for another round!';
-      }
+    case 'round_result': {
+      const prompt = document.createElement('div');
+      prompt.textContent = 'Review the result, then start the next round when ready.';
+      controlsEl.appendChild(prompt);
+      controlsEl.appendChild(buildButton('Start next round', () => startRound()));
       break;
+    }
     default:
       controlsEl.textContent = '';
   }
