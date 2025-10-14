@@ -14,6 +14,15 @@ main {
   margin: 0 auto;
 }
 
+#game-section {
+  display: grid;
+  gap: 1.75rem;
+}
+
+#game-section > * {
+  margin: 0;
+}
+
 h1 {
   text-align: center;
   margin-top: 1.5rem;
@@ -78,11 +87,16 @@ button:disabled {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.5rem;
 }
 
-#players {
-  margin-bottom: 1.5rem;
+#players,
+#controls,
+#round {
+  margin: 0;
+}
+
+#share-panel {
+  margin-top: 0;
 }
 
 .identity-form {
