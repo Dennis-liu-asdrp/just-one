@@ -85,22 +85,6 @@ button:disabled {
   margin-bottom: 1.5rem;
 }
 
-.identity-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-end;
-  margin-top: 0.75rem;
-}
-
-.identity-form .form-field {
-  flex: 1;
-  min-width: 180px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
 .player-actions {
   display: flex;
   flex-wrap: wrap;
