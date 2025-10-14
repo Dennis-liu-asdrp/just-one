@@ -409,51 +409,74 @@ function renderRound() {
     roundEl.appendChild(card);
   }
 
+  const stage = round.stage;
+
   if (round.hints.length > 0) {
-    const list = document.createElement('ul');
-    list.className = 'hint-list';
+    const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
 
-    const showTexts = round.stage !== 'collecting_hints' || player.role === 'hint';
-    const hintsForDisplay = round.stage === 'awaiting_guess' ? round.hints.filter(h => !h.invalid) : round.hints;
+    if (guesserWaiting) {
+      const message = document.createElement('p');
+      message.textContent = stage === 'reviewing_hints'
+        ? 'Hint givers are reviewing collisions. Hang tight!'
+        : 'Hint givers are preparing their clues.';
+      roundEl.appendChild(message);
+    } else {
+      const list = document.createElement('ul');
+      list.className = 'hint-list';
 
-    hintsForDisplay.forEach(hint => {
-      const li = document.createElement('li');
-      li.className = 'hint-item';
-      if (hint.invalid) {
-        li.classList.add('invalid');
-      }
+      const canSeeText = player.role === 'hint'
+        || stage === 'round_result'
+        || (player.role === 'guesser' && stage === 'awaiting_guess');
 
-      const text = showTexts ? escapeHtml(hint.text) : hint.playerId === player.id ? escapeHtml(hint.text) : 'Submitted';
-      const content = document.createElement('div');
-      content.innerHTML = `<div>${text}</div>`;
-      if (player.role === 'hint') {
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = hint.author;
-        content.appendChild(meta);
-      }
+      const hintsForDisplay = player.role === 'guesser' && stage === 'awaiting_guess'
+        ? round.hints.filter(h => !h.invalid)
+        : round.hints;
 
-      li.appendChild(content);
+      hintsForDisplay.forEach(hint => {
+        const li = document.createElement('li');
+        li.className = 'hint-item';
+        if (hint.invalid) {
+          li.classList.add('invalid');
+        }
 
-      if (player.role === 'hint' && round.stage === 'reviewing_hints') {
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.textContent = hint.invalid ? 'Restore' : 'Eliminate';
-        toggle.addEventListener('click', () => toggleHint(hint));
-        li.appendChild(toggle);
-      }
+        const text = canSeeText ? escapeHtml(hint.text) : hint.playerId === player.id ? escapeHtml(hint.text) : 'Hidden';
+        const content = document.createElement('div');
+        content.innerHTML = `<div>${text}</div>`;
+        if (player.role === 'hint') {
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = hint.author;
+          content.appendChild(meta);
+        }
 
-      if (round.stage === 'awaiting_guess' && player.role === 'guesser') {
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = 'Valid clue';
-        li.appendChild(meta);
-      }
+        li.appendChild(content);
 
-      list.appendChild(li);
-    });
+        if (player.role === 'hint' && stage === 'reviewing_hints') {
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.textContent = hint.invalid ? 'Restore' : 'Eliminate';
+          toggle.addEventListener('click', () => toggleHint(hint));
+          li.appendChild(toggle);
+        }
 
-    roundEl.appendChild(list);
+        if (stage === 'awaiting_guess' && player.role === 'guesser') {
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = 'Valid clue';
+          li.appendChild(meta);
+        }
+
+        list.appendChild(li);
+      });
+
+      roundEl.appendChild(list);
+    }
+  } else if (player.role === 'guesser' && stage !== 'round_result') {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = stage === 'reviewing_hints'
+      ? 'Hint givers are reviewing clues before revealing them.'
+      : 'Waiting for hint givers to submit their clues.';
+    roundEl.appendChild(placeholder);
   }
 
   if (round.stage === 'collecting_hints' && player.role === 'hint') {
