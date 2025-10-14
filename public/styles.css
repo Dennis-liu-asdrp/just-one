@@ -108,6 +108,12 @@ button:disabled {
   margin-top: 0.75rem;
 }
 
+.roles-locked {
+  margin-top: 0.75rem;
+  color: #51556d;
+  font-size: 0.95rem;
+}
+
 .player-list {
   display: flex;
   flex-wrap: wrap;

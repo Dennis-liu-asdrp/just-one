@@ -249,34 +249,44 @@ function renderPlayerInfo() {
   summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
   playerInfo.appendChild(summary);
 
-  if (!serverState?.round) {
+  const round = serverState?.round;
+  const rolesUnlocked = !round || round.stage === 'round_result';
+
+  if (!round) {
     const prompt = document.createElement('div');
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
   }
 
-  const form = document.createElement('form');
-  form.className = 'identity-form';
-  form.innerHTML = `
-    <div class="form-field">
-      <label>
-        <span>Name</span>
-        <input type="text" name="name" maxlength="24" autocomplete="off" value="${escapeHtml(player.name)}" required />
-      </label>
-    </div>
-    <div class="form-field">
-      <label>
-        <span>Role</span>
-        <select name="role">
-          <option value="guesser"${player.role === 'guesser' ? ' selected' : ''}>Guesser</option>
-          <option value="hint"${player.role === 'hint' ? ' selected' : ''}>Hint giver</option>
-        </select>
-      </label>
-    </div>
-    <button type="submit">Update</button>
-  `;
-  form.addEventListener('submit', handleIdentitySubmit);
-  playerInfo.appendChild(form);
+  if (rolesUnlocked) {
+    const form = document.createElement('form');
+    form.className = 'identity-form';
+    form.innerHTML = `
+      <div class="form-field">
+        <label>
+          <span>Name</span>
+          <input type="text" name="name" maxlength="24" autocomplete="off" value="${escapeHtml(player.name)}" required />
+        </label>
+      </div>
+      <div class="form-field">
+        <label>
+          <span>Role</span>
+          <select name="role">
+            <option value="guesser"${player.role === 'guesser' ? ' selected' : ''}>Guesser</option>
+            <option value="hint"${player.role === 'hint' ? ' selected' : ''}>Hint giver</option>
+          </select>
+        </label>
+      </div>
+      <button type="submit">Update</button>
+    `;
+    form.addEventListener('submit', handleIdentitySubmit);
+    playerInfo.appendChild(form);
+  } else {
+    const notice = document.createElement('div');
+    notice.className = 'roles-locked';
+    notice.textContent = 'Roles are locked until this round is complete.';
+    playerInfo.appendChild(notice);
+  }
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';

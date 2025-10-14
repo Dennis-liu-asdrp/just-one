@@ -222,6 +222,11 @@ async function handleJoin(req, res) {
     let player = playerId ? state.players.find(p => p.id === playerId) : null;
 
     if (player) {
+      const roleChangeRequested = role !== player.role;
+      if (roleChangeRequested && isRoleChangeLocked()) {
+        respond(res, 409, { error: 'Roles are locked during an active round' });
+        return;
+      }
       if (role === 'guesser' && roleIsTaken('guesser', player.id)) {
         respond(res, 409, { error: 'Another guesser is already active' });
         return;
@@ -253,6 +258,12 @@ async function handleJoin(req, res) {
 
 function roleIsTaken(role, ignoreId = null) {
   return state.players.some(p => p.role === role && p.id !== ignoreId);
+}
+
+function isRoleChangeLocked() {
+  if (!state.round) return false;
+  const lockedStages = ['collecting_hints', 'reviewing_hints', 'awaiting_guess'];
+  return lockedStages.includes(state.round.stage);
 }
 
 async function handleStartRound(req, res) {
