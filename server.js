@@ -24,7 +24,9 @@ const words = [
 const state = {
   players: [],
   round: null,
-  score: { success: 0, failure: 0 }
+  score: { success: 0, failure: 0 },
+  wordDeck: shuffle([...words]),
+  lastWord: null
 };
 
 const sseClients = new Set();
@@ -280,7 +282,7 @@ async function handleStartRound(req, res) {
       return;
     }
 
-    const word = pickWord();
+    const word = drawWord();
     state.round = {
       id: randomUUID(),
       word,
@@ -574,9 +576,33 @@ function touchPlayer(player) {
   }
 }
 
-function pickWord() {
-  const index = Math.floor(Math.random() * words.length);
-  return words[index];
+function shuffle(list) {
+  const array = [...list];
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+function drawWord() {
+  refreshWordDeck();
+  const nextWord = state.wordDeck.shift();
+  state.lastWord = nextWord;
+  return nextWord;
+}
+
+function refreshWordDeck() {
+  if (!state.wordDeck || state.wordDeck.length === 0) {
+    state.wordDeck = shuffle([...words]);
+    // Avoid giving the same word twice in a row if possible.
+    if (state.lastWord && state.wordDeck.length > 1 && state.wordDeck[0] === state.lastWord) {
+      const swapIndex = state.wordDeck.findIndex(word => word !== state.lastWord);
+      if (swapIndex > 0) {
+        [state.wordDeck[0], state.wordDeck[swapIndex]] = [state.wordDeck[swapIndex], state.wordDeck[0]];
+      }
+    }
+  }
 }
 
 function serializeState() {
