@@ -249,34 +249,18 @@ function renderPlayerInfo() {
   summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
   playerInfo.appendChild(summary);
 
-  if (!serverState?.round) {
+  const round = serverState?.round;
+
+  if (!round) {
     const prompt = document.createElement('div');
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
+  } else {
+    const notice = document.createElement('div');
+    notice.className = 'roles-locked';
+    notice.textContent = 'Roles are locked until this round is complete.';
+    playerInfo.appendChild(notice);
   }
-
-  const form = document.createElement('form');
-  form.className = 'identity-form';
-  form.innerHTML = `
-    <div class="form-field">
-      <label>
-        <span>Name</span>
-        <input type="text" name="name" maxlength="24" autocomplete="off" value="${escapeHtml(player.name)}" required />
-      </label>
-    </div>
-    <div class="form-field">
-      <label>
-        <span>Role</span>
-        <select name="role">
-          <option value="guesser"${player.role === 'guesser' ? ' selected' : ''}>Guesser</option>
-          <option value="hint"${player.role === 'hint' ? ' selected' : ''}>Hint giver</option>
-        </select>
-      </label>
-    </div>
-    <button type="submit">Update</button>
-  `;
-  form.addEventListener('submit', handleIdentitySubmit);
-  playerInfo.appendChild(form);
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';
@@ -636,38 +620,6 @@ async function handleCopyShareLink() {
     }
   } catch (err) {
     showMessage('Copy failed. You can copy the link manually.', 'error');
-  }
-}
-
-async function handleIdentitySubmit(event) {
-  event.preventDefault();
-  if (!player) return;
-  const form = event.currentTarget;
-  const formData = new FormData(form);
-  const name = (formData.get('name') || '').toString().trim();
-  const role = formData.get('role');
-  if (!name) {
-    showMessage('Name cannot be empty.', 'error');
-    return;
-  }
-  if (!role) {
-    showMessage('Select a role.', 'error');
-    return;
-  }
-  try {
-    const { player: updated } = await apiPost('/api/join', {
-      playerId: player.id,
-      name,
-      role
-    });
-    player = updated;
-    localStorage.setItem('just-one-player', JSON.stringify(updated));
-    nameInput.value = updated.name;
-    roleSelect.value = updated.role;
-    showMessage('Profile updated.');
-    updateLayout();
-  } catch (err) {
-    // handled by apiPost
   }
 }
 
