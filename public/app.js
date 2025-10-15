@@ -22,6 +22,8 @@ let fetchWordInFlight = false;
 let lastKnownRoundId = null;
 let lastKnownStage = null;
 let currentWord = null;
+let buttonFeedbackInitialized = false;
+let audioContext = null;
 
 init();
 
@@ -33,6 +35,7 @@ function init() {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
+  setupButtonFeedback();
 }
 
 async function restorePlayer() {
@@ -246,6 +249,7 @@ function renderPlayerInfo() {
   }
 
   const summary = document.createElement('div');
+  summary.className = 'identity-summary';
   summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
   playerInfo.appendChild(summary);
 
@@ -253,6 +257,7 @@ function renderPlayerInfo() {
 
   if (!round) {
     const prompt = document.createElement('div');
+    prompt.className = 'info-card subtle';
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
   } else {
@@ -317,7 +322,7 @@ function renderControls() {
     if (player.role === 'hint') {
       controlsEl.appendChild(buildButton('Start new round', () => startRound()));
     } else {
-      controlsEl.textContent = 'Waiting for a hint giver to start the first round.';
+      setControlsMessage('Waiting for a hint giver to start the first round.');
     }
     return;
   }
@@ -327,14 +332,14 @@ function renderControls() {
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Review collisions', () => beginReview(), round.hints.length === 0));
       } else {
-        controlsEl.textContent = 'Hints are being prepared.';
+        setControlsMessage('Hints are being prepared.');
       }
       break;
     case 'reviewing_hints':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
       } else {
-        controlsEl.textContent = 'Hint givers are resolving collisions.';
+        setControlsMessage('Hint givers are resolving collisions.');
       }
       break;
     case 'awaiting_guess':
@@ -361,19 +366,27 @@ function renderControls() {
         });
         controlsEl.appendChild(form);
       } else {
-        controlsEl.textContent = 'Waiting for the guesser to decide.';
+        setControlsMessage('Waiting for the guesser to decide.');
       }
       break;
     case 'round_result':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Start next round', () => startRound()));
       } else {
-        controlsEl.textContent = 'Review the result and ask for another round!';
+        setControlsMessage('Review the result and ask for another round!');
       }
       break;
     default:
-      controlsEl.textContent = '';
+      controlsEl.innerHTML = '';
   }
+}
+
+function setControlsMessage(text) {
+  controlsEl.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'info-card subtle';
+  card.textContent = text;
+  controlsEl.appendChild(card);
 }
 
 function renderRound() {
@@ -382,7 +395,10 @@ function renderRound() {
 
   const round = serverState.round;
   if (!round) {
-    roundEl.innerHTML = '<p>No round in progress yet.</p>';
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No round in progress yet.';
+    roundEl.appendChild(empty);
     return;
   }
 
@@ -399,7 +415,8 @@ function renderRound() {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
 
     if (guesserWaiting) {
-      const message = document.createElement('p');
+      const message = document.createElement('div');
+      message.className = 'info-card subtle';
       message.textContent = stage === 'reviewing_hints'
         ? 'Hint givers are reviewing collisions. Hang tight!'
         : 'Hint givers are preparing their clues.';
@@ -454,9 +471,10 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
-    }
+  }
   } else if (player.role === 'guesser' && stage !== 'round_result') {
-    const placeholder = document.createElement('p');
+    const placeholder = document.createElement('div');
+    placeholder.className = 'info-card subtle';
     placeholder.textContent = stage === 'reviewing_hints'
       ? 'Hint givers are reviewing clues before revealing them.'
       : 'Waiting for hint givers to submit their clues.';
@@ -648,6 +666,61 @@ function handleBeforeUnload() {
   } catch (err) {
     // ignore; page is closing
   }
+}
+
+function setupButtonFeedback() {
+  if (buttonFeedbackInitialized) return;
+  buttonFeedbackInitialized = true;
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (!button || button.disabled) return;
+    triggerButtonPulse(button);
+    playClickSound();
+  });
+}
+
+function triggerButtonPulse(button) {
+  if (isMotionReduced()) return;
+  button.classList.remove('pulse');
+  void button.offsetWidth;
+  button.classList.add('pulse');
+  window.setTimeout(() => {
+    button.classList.remove('pulse');
+  }, 280);
+}
+
+function playClickSound() {
+  if (isMotionReduced()) return;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    if (!audioContext || audioContext.state === 'closed') {
+      audioContext = new AudioContextClass();
+    }
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
+    const now = audioContext.currentTime;
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = 'triangle';
+    oscillator.frequency.setValueAtTime(420, now);
+    oscillator.frequency.exponentialRampToValueAtTime(640, now + 0.14);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.25);
+  } catch (err) {
+    // Swallow audio errors silently (autoplay restrictions, etc.).
+  }
+}
+
+function isMotionReduced() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 function escapeHtml(value) {
