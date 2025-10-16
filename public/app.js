@@ -24,6 +24,9 @@ const avatarModalBackdrop = document.getElementById('avatar-modal-backdrop');
 
 const AVATAR_OPTIONS = [
   { id: 'default', label: 'Classic', emoji: '👤', background: 'linear-gradient(135deg, #444b5a, #242b38)' },
+  { id: 'dog', label: 'Dog', emoji: '🐶', background: 'linear-gradient(135deg, #fbbf24, #f97316)' },
+  { id: 'cat', label: 'Cat', emoji: '🐱', background: 'linear-gradient(135deg, #c084fc, #ec4899)' },
+  { id: 'cow', label: 'Cow', emoji: '🐮', background: 'linear-gradient(135deg, #9ca3af, #4b5563)' },
   { id: 'astronaut', label: 'Astronaut', emoji: '👩‍🚀', background: 'linear-gradient(135deg, #4338ca, #1f2937)' },
   { id: 'aurora', label: 'Aurora', emoji: '🌌', background: 'linear-gradient(135deg, #22d3ee, #6366f1)' },
   { id: 'basketball', label: 'Hoops', emoji: '🏀', background: 'linear-gradient(135deg, #f97316, #1f2937)' },

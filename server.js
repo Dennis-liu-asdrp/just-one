@@ -22,7 +22,7 @@ const words = [
 ];
 
 const avatars = [
-  'default','dog','cat','fox','owl','panda','tiger','koala','unicorn','rocket','pizza','music','camera','robot'
+  'default','dog','cat','cow','fox','owl','panda','tiger','koala','unicorn','rocket','pizza','music','camera','robot'
 ];
 
 const state = {
