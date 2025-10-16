@@ -21,13 +21,19 @@ const words = [
   'Pinnacle','Quest','Reverie','Serenade','Timber','Udon','Verdict','Wingman','Yearbook','Zenith'
 ];
 
+const avatars = [
+  'default','dog','cat','cow','fox','owl','panda','tiger','koala','unicorn','rocket','pizza','music','camera','robot'
+];
+
 const state = {
   players: [],
   round: null,
   score: { success: 0, failure: 0 },
-  wordDeck: shuffle([...words]),
+  wordDeck: [],
   lastWord: null
 };
+
+refreshWordDeck();
 
 const sseClients = new Set();
 
@@ -194,7 +200,7 @@ async function readBody(req) {
     req.on('data', chunk => {
       data += chunk;
       if (data.length > 1e6) {
-        req.connection.destroy();
+        req.destroy();
         reject(new Error('Payload too large'));
       }
     });
@@ -215,6 +221,7 @@ async function handleJoin(req, res) {
     const playerId = body.playerId || null;
     const name = (body.name || '').trim();
     const role = body.role === 'guesser' ? 'guesser' : 'hint';
+    const incomingAvatar = typeof body.avatar === 'string' ? sanitizeAvatar(body.avatar) : null;
 
     if (!name) {
       respond(res, 400, { error: 'Name is required' });
@@ -225,8 +232,13 @@ async function handleJoin(req, res) {
 
     if (player) {
       const roleChangeRequested = role !== player.role;
+      const avatarChangeRequested = incomingAvatar && incomingAvatar !== (player.avatar || 'default');
       if (roleChangeRequested && isRoleChangeLocked()) {
         respond(res, 409, { error: 'Roles are locked during an active round' });
+        return;
+      }
+      if (avatarChangeRequested && isAvatarChangeLocked()) {
+        respond(res, 409, { error: 'Avatars are locked during an active round' });
         return;
       }
       if (role === 'guesser' && roleIsTaken('guesser', player.id)) {
@@ -236,6 +248,9 @@ async function handleJoin(req, res) {
       player.name = name;
       player.role = role;
       player.lastSeenAt = Date.now();
+      if (avatarChangeRequested) {
+        player.avatar = incomingAvatar;
+      }
     } else {
       if (role === 'guesser' && roleIsTaken('guesser')) {
         respond(res, 409, { error: 'A guesser is already active' });
@@ -246,9 +261,14 @@ async function handleJoin(req, res) {
         name,
         role,
         joinedAt: Date.now(),
-        lastSeenAt: Date.now()
+        lastSeenAt: Date.now(),
+        avatar: incomingAvatar || 'default'
       };
       state.players.push(player);
+    }
+
+    if (!player.avatar) {
+      player.avatar = 'default';
     }
 
     respond(res, 200, { player });
@@ -266,6 +286,10 @@ function isRoleChangeLocked() {
   if (!state.round) return false;
   const lockedStages = ['collecting_hints', 'reviewing_hints', 'awaiting_guess'];
   return lockedStages.includes(state.round.stage);
+}
+
+function isAvatarChangeLocked() {
+  return isRoleChangeLocked();
 }
 
 async function handleStartRound(req, res) {
@@ -569,7 +593,6 @@ function removePlayer(playerId) {
     if (state.round.guess && state.round.guess.playerId === playerId) {
       state.round.guess = null;
     }
-    // If the sole guesser left during an active round, end the round early.
     if (state.round.stage !== 'round_result') {
       const hasGuesser = state.players.some(p => p.role === 'guesser');
       if (!hasGuesser) {
@@ -587,6 +610,12 @@ function touchPlayer(player) {
   }
 }
 
+function sanitizeAvatar(input) {
+  if (typeof input !== 'string') return 'default';
+  const trimmed = input.trim().toLowerCase();
+  return avatars.includes(trimmed) ? trimmed : 'default';
+}
+
 function shuffle(list) {
   const array = [...list];
   for (let i = array.length - 1; i > 0; i -= 1) {
@@ -597,21 +626,23 @@ function shuffle(list) {
 }
 
 function drawWord() {
-  refreshWordDeck();
-  const nextWord = state.wordDeck.shift();
-  state.lastWord = nextWord;
-  return nextWord;
+  if (!state.wordDeck.length) {
+    refreshWordDeck();
+  }
+  const word = state.wordDeck.shift();
+  state.lastWord = word;
+  if (!state.wordDeck.length) {
+    refreshWordDeck();
+  }
+  return word;
 }
 
 function refreshWordDeck() {
-  if (!state.wordDeck || state.wordDeck.length === 0) {
-    state.wordDeck = shuffle([...words]);
-    // Avoid giving the same word twice in a row if possible.
-    if (state.lastWord && state.wordDeck.length > 1 && state.wordDeck[0] === state.lastWord) {
-      const swapIndex = state.wordDeck.findIndex(word => word !== state.lastWord);
-      if (swapIndex > 0) {
-        [state.wordDeck[0], state.wordDeck[swapIndex]] = [state.wordDeck[swapIndex], state.wordDeck[0]];
-      }
+  state.wordDeck = shuffle(words);
+  if (state.lastWord && state.wordDeck.length > 1 && state.wordDeck[0] === state.lastWord) {
+    const swapIndex = state.wordDeck.findIndex(w => w !== state.lastWord);
+    if (swapIndex > 0) {
+      [state.wordDeck[0], state.wordDeck[swapIndex]] = [state.wordDeck[swapIndex], state.wordDeck[0]];
     }
   }
 }
@@ -650,7 +681,8 @@ function serializeState() {
     players: state.players.map(player => ({
       id: player.id,
       name: player.name,
-      role: player.role
+      role: player.role,
+      avatar: player.avatar || 'default'
     })),
     round,
     score: state.score
