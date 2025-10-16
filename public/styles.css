@@ -47,6 +47,15 @@ main {
   gap: 24px;
 }
 
+#game-section {
+  display: grid;
+  gap: 1.75rem;
+}
+
+#game-section > * {
+  margin: 0;
+}
+
 h1 {
   text-align: center;
   margin: 12px 0 0;
@@ -198,6 +207,19 @@ button.pulse {
   width: 4px;
   height: 100%;
   background: linear-gradient(180deg, var(--accent), transparent);
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#players,
+#controls,
+#round {
+  margin: 0;
+}
+
+#share-panel {
+  margin-top: 0;
 }
 
 #player-info {
