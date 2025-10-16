@@ -14,6 +14,13 @@ const sharePanel = document.getElementById('share-panel');
 const shareLinkInput = document.getElementById('share-link');
 const copyShareButton = document.getElementById('copy-share');
 const shareHint = document.getElementById('share-hint');
+const gameColumns = document.getElementById('game-columns');
+const leaderboardPanel = document.getElementById('leaderboard-panel');
+const leaderboardList = document.getElementById('leaderboard-list');
+const personalStatsSection = document.getElementById('personal-stats');
+const leaderboardTabs = leaderboardPanel ? Array.from(leaderboardPanel.querySelectorAll('.leaderboard-tab')) : [];
+
+let leaderboardView = 'room';
 
 let player = null;
 let serverState = null;
@@ -31,6 +38,15 @@ function init() {
   joinForm.addEventListener('submit', handleJoinSubmit);
   copyShareButton.addEventListener('click', handleCopyShareLink);
   window.addEventListener('beforeunload', handleBeforeUnload);
+  leaderboardTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const view = tab.dataset.view === 'global' ? 'global' : 'room';
+      if (view === leaderboardView) return;
+      leaderboardView = view;
+      leaderboardTabs.forEach(btn => btn.classList.toggle('active', btn === tab));
+      renderLeaderboard();
+    });
+  });
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
@@ -208,6 +224,7 @@ function updateLayout() {
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
     renderSharePanel();
+    renderLeaderboard();
     return;
   }
 
@@ -220,6 +237,7 @@ function updateLayout() {
   renderScore();
   renderControls();
   renderRound();
+  renderLeaderboard();
 }
 
 function renderSharePanel() {
@@ -311,6 +329,131 @@ function renderScore() {
   stageIndicator.textContent = formatStage(stage);
   const { success, failure } = serverState.score;
   scoreboardEl.textContent = `Score: ${success} correct · ${failure} misses`;
+}
+
+function renderLeaderboard() {
+  if (!leaderboardPanel || !leaderboardList || !gameColumns) return;
+  const board = serverState?.leaderboard ?? null;
+
+  if (!player || !board) {
+    if (!player) {
+      leaderboardView = 'room';
+      if (leaderboardTabs.length) {
+        leaderboardTabs.forEach(tab => {
+          tab.classList.toggle('active', tab.dataset.view === leaderboardView);
+        });
+      }
+    }
+    leaderboardPanel.classList.add('hidden');
+    gameColumns.classList.add('single-column');
+    leaderboardList.innerHTML = '';
+    if (personalStatsSection) {
+      personalStatsSection.innerHTML = '';
+    }
+    return;
+  }
+
+  leaderboardPanel.classList.remove('hidden');
+  gameColumns.classList.remove('single-column');
+
+  if (leaderboardTabs.length) {
+    leaderboardTabs.forEach(tab => {
+      const isActive = tab.dataset.view === leaderboardView;
+      tab.classList.toggle('active', isActive);
+    });
+  }
+
+  const viewKey = leaderboardView === 'global' ? 'global' : 'room';
+  const entries = Array.isArray(board[viewKey]) ? board[viewKey] : [];
+  leaderboardList.innerHTML = '';
+
+  if (entries.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'leaderboard-empty';
+    li.textContent = viewKey === 'room'
+      ? 'No hint data in this room yet — keep those clues coming.'
+      : 'No global hint history yet.';
+    leaderboardList.appendChild(li);
+  } else {
+    entries.slice(0, 10).forEach((entry, index) => {
+      const li = document.createElement('li');
+      li.className = 'leaderboard-row';
+      if (player && entry.playerId === player.id) {
+        li.classList.add('is-self');
+      }
+      const metrics = entry.metrics || {};
+      const scoreValue = formatMetricValue(metrics.playerScore ?? entry.playerScore);
+      li.innerHTML = `
+        <div class="leaderboard-rank">#${index + 1}</div>
+        <div class="leaderboard-info">
+          <div class="leaderboard-name">${escapeHtml(entry.name)}</div>
+          <div class="leaderboard-metrics">
+            ${renderLeaderboardMetric('🥇', 'Clue Usefulness Score', metrics.cus)}
+            ${renderLeaderboardMetric('💡', 'Hint Survival Rate', metrics.hsr)}
+            ${renderLeaderboardMetric('🎯', 'Guess Assist Rate', metrics.gar)}
+            ${renderLeaderboardMetric('🔁', 'Elimination Frequency', metrics.ef)}
+          </div>
+        </div>
+        <div class="leaderboard-score">${scoreValue}<span>PlayerScore</span></div>
+      `;
+      leaderboardList.appendChild(li);
+    });
+  }
+
+  if (!personalStatsSection) return;
+
+  const personalEntry = board.byPlayer?.[player.id];
+  if (!personalEntry || (personalEntry.totals?.hintsGiven ?? 0) === 0) {
+    const emptyMessage = player.role === 'hint'
+      ? 'Give your first hint to start building your profile.'
+      : 'Switch to a hint-giver role to start building your profile.';
+    personalStatsSection.innerHTML = `
+      <h4>Your Stats</h4>
+      <p class="personal-empty">${emptyMessage}</p>
+    `;
+    return;
+  }
+
+  const metrics = personalEntry.metrics || {};
+  const totals = personalEntry.totals || {};
+  const bestHints = Array.isArray(personalEntry.bestHints) ? personalEntry.bestHints : [];
+
+  const summaryHtml = `
+    <div class="personal-summary">
+      ${buildStatChip('Clue Usefulness', `${formatMetricValue(metrics.cus)}%`)}
+      ${buildStatChip('Hint Survival Rate', `${formatMetricValue(metrics.hsr)}%`)}
+      ${buildStatChip('Guess Assist Rate', `${formatMetricValue(metrics.gar)}%`)}
+      ${buildStatChip('Elimination Frequency', `${formatMetricValue(metrics.ef)}%`)}
+    </div>
+  `;
+
+  const volumeHtml = `
+    <div class="personal-volume">
+      <span><strong>${totals.hintsGiven ?? 0}</strong> hints given</span>
+      <span><strong>${totals.hintsKept ?? 0}</strong> survived</span>
+      <span><strong>${totals.hintsEliminated ?? 0}</strong> eliminated</span>
+      <span><strong>${totals.successfulRounds ?? 0}</strong> winning rounds</span>
+    </div>
+  `;
+
+  const hintsHtml = bestHints.length
+    ? `<div class="personal-hints">
+         <h5>Top hints</h5>
+         <ul>
+           ${bestHints.map(renderPersonalHint).join('')}
+         </ul>
+       </div>`
+    : `<div class="personal-hints">
+         <h5>Top hints</h5>
+         <p class="personal-empty">Keep the streak going to showcase your best three hints.</p>
+       </div>`;
+
+  personalStatsSection.innerHTML = `
+    <h4>Your Stats</h4>
+    ${summaryHtml}
+    ${volumeHtml}
+    ${hintsHtml}
+  `;
 }
 
 function renderControls() {
@@ -667,6 +810,31 @@ function handleBeforeUnload() {
   }
 }
 
+function renderLeaderboardMetric(icon, label, value) {
+  const formatted = `${formatMetricValue(value)}%`;
+  return `<span class="leaderboard-metric" title="${escapeHtml(label)}">${icon} <strong>${formatted}</strong></span>`;
+}
+
+function buildStatChip(label, value) {
+  return `<div class="stat-chip"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function renderPersonalHint(hint) {
+  const text = escapeHtml(hint?.text ?? '');
+  const word = hint?.word ? escapeHtml(hint.word) : null;
+  const outcome = hint?.correct ? 'Correct round' : 'Missed round';
+  const status = hint?.invalid ? 'Eliminated' : 'Stayed on board';
+  const metaParts = [];
+  if (word) metaParts.push(`Word: ${word}`);
+  metaParts.push(outcome);
+  metaParts.push(status);
+  return `<li><strong>&ldquo;${text}&rdquo;</strong><div class="hint-meta">${metaParts.join(' • ')}</div></li>`;
+}
+
+function formatMetricValue(raw) {
+  const numeric = typeof raw === 'number' ? raw : Number(raw ?? 0);
+  if (!Number.isFinite(numeric)) return '0';
+  return numeric.toFixed(1).replace(/\.0$/, '');
 function setupButtonFeedback() {
   if (buttonFeedbackInitialized) return;
   buttonFeedbackInitialized = true;

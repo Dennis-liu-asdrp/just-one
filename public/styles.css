@@ -47,13 +47,24 @@ main {
   gap: 24px;
 }
 
-#game-section {
-  display: grid;
-  gap: 1.75rem;
-}
-
 #game-section > * {
   margin: 0;
+}
+
+.game-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.game-columns.single-column {
+  grid-template-columns: 1fr;
+}
+
+.game-main {
+  display: grid;
+  gap: 1.75rem;
 }
 
 h1 {
@@ -210,6 +221,235 @@ button.pulse {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.leaderboard-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: linear-gradient(180deg, rgba(44, 91, 240, 0.12), rgba(44, 91, 240, 0.05));
+  border-radius: 16px;
+  padding: 1.25rem;
+  border: 1px solid rgba(44, 91, 240, 0.18);
+  box-shadow: 0 12px 28px rgba(15, 35, 95, 0.12);
+}
+
+.leaderboard-header h3 {
+  margin: 0;
+}
+
+.leaderboard-caption {
+  margin: 0.35rem 0 0;
+  color: #3c4a8b;
+  font-size: 0.9rem;
+}
+
+.leaderboard-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.leaderboard-tab {
+  background: rgba(44, 91, 240, 0.12);
+  color: #1a1a1a;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  transition: background 0.2s ease, color 0.2s ease, border 0.2s ease;
+}
+
+.leaderboard-tab:hover {
+  background: rgba(44, 91, 240, 0.2);
+}
+
+.leaderboard-tab.active {
+  background: #2c5bf0;
+  color: #fff;
+  border-color: #2c5bf0;
+}
+
+.leaderboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  background: #fff;
+  border-radius: 12px;
+  padding: 0.75rem;
+  box-shadow: 0 8px 20px rgba(15, 35, 95, 0.12);
+}
+
+.leaderboard-row.is-self {
+  border: 1px solid rgba(44, 91, 240, 0.55);
+  box-shadow: 0 12px 26px rgba(44, 91, 240, 0.28);
+}
+
+.leaderboard-rank {
+  font-weight: 700;
+  color: #2c5bf0;
+  width: 2rem;
+  text-align: center;
+}
+
+.leaderboard-info {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.leaderboard-name {
+  font-weight: 600;
+}
+
+.leaderboard-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  font-size: 0.84rem;
+  color: #3c4a8b;
+}
+
+.leaderboard-metric strong {
+  font-weight: 600;
+}
+
+.leaderboard-score {
+  font-weight: 700;
+  color: #1f2d60;
+}
+
+.leaderboard-score span {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #5c6590;
+}
+
+.personal-stats {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(44, 91, 240, 0.08);
+  border: 1px dashed rgba(44, 91, 240, 0.35);
+}
+
+.personal-stats h4 {
+  margin: 0;
+}
+
+.personal-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.personal-summary .stat-chip {
+  background: #fff;
+  border-radius: 10px;
+  padding: 0.6rem;
+  box-shadow: 0 6px 14px rgba(15, 35, 95, 0.12);
+  display: grid;
+  gap: 0.25rem;
+}
+
+.stat-chip span {
+  font-size: 0.8rem;
+  color: #3c4a8b;
+}
+
+.personal-hints {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.personal-hints h5 {
+  margin: 0;
+}
+
+.personal-hints ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.personal-hints li {
+  background: #fff;
+  border-radius: 10px;
+  padding: 0.65rem;
+  box-shadow: 0 6px 14px rgba(15, 35, 95, 0.1);
+}
+
+.personal-hints li .hint-meta {
+  font-size: 0.75rem;
+  color: #5c6590;
+  margin-top: 0.25rem;
+}
+
+.leaderboard-empty,
+.personal-empty {
+  color: #5c6590;
+  font-size: 0.9rem;
+}
+
+.personal-volume {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  color: #3c4a8b;
+}
+
+.personal-volume span {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.personal-volume strong {
+  color: #1f2d60;
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .game-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard-panel {
+    order: -1;
+  }
+
+  .personal-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .leaderboard-row {
+    grid-template-columns: 1fr;
+    text-align: left;
+  }
+
+  .leaderboard-score {
+    justify-self: flex-start;
+  }
+
+  .leaderboard-score span {
+    display: inline;
+    margin-left: 0.35rem;
+  }
 }
 
 #players,

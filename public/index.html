@@ -34,27 +34,44 @@
     </section>
 
     <section id="game-section" class="panel hidden">
-      <div id="player-info"></div>
+      <div id="game-columns" class="game-columns">
+        <aside id="leaderboard-panel" class="leaderboard-panel hidden">
+          <div class="leaderboard-header">
+            <h3>Leaderboard</h3>
+            <p class="leaderboard-caption">Rewarding the hint heroes.</p>
+          </div>
+          <div class="leaderboard-toggle" role="tablist">
+            <button type="button" data-view="room" class="leaderboard-tab active">Room</button>
+            <button type="button" data-view="global" class="leaderboard-tab">Global</button>
+          </div>
+          <ol id="leaderboard-list" class="leaderboard-list"></ol>
+          <section id="personal-stats" class="personal-stats"></section>
+        </aside>
 
-      <div class="status-bar">
-        <div id="stage-indicator"></div>
-        <div id="scoreboard"></div>
-      </div>
+        <div id="game-main" class="game-main">
+          <div id="player-info"></div>
 
-      <section id="players"></section>
+          <div class="status-bar">
+            <div id="stage-indicator"></div>
+            <div id="scoreboard"></div>
+          </div>
 
-      <section id="controls"></section>
+          <section id="players"></section>
 
-      <section id="round"></section>
+          <section id="controls"></section>
 
-      <section id="share-panel" class="panel subtle hidden">
-        <h3>Invite others</h3>
-        <div class="share-row">
-          <input id="share-link" type="text" readonly />
-          <button type="button" id="copy-share">Copy</button>
+          <section id="round"></section>
+
+          <section id="share-panel" class="panel subtle hidden">
+            <h3>Invite others</h3>
+            <div class="share-row">
+              <input id="share-link" type="text" readonly />
+              <button type="button" id="copy-share">Copy</button>
+            </div>
+            <p class="hint" id="share-hint">Share this address with friends on your network.</p>
+          </section>
         </div>
-        <p class="hint" id="share-hint">Share this address with friends on your network.</p>
-      </section>
+      </div>
     </section>
 
     <div id="messages"></div>
