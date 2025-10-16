@@ -27,6 +27,8 @@ const state = {
   score: { success: 0, failure: 0 }
 };
 
+const playerStats = new Map();
+
 const sseClients = new Set();
 
 const HEARTBEAT_INTERVAL = 10000;
@@ -244,6 +246,8 @@ async function handleJoin(req, res) {
       state.players.push(player);
     }
 
+    syncPlayerStats(player.id, player.name);
+
     respond(res, 200, { player });
     broadcastState();
   } catch (err) {
@@ -290,7 +294,8 @@ async function handleStartRound(req, res) {
       hints: [],
       guess: null,
       revealedAt: null,
-      finishedAt: null
+      finishedAt: null,
+      statsApplied: false
     };
 
     respond(res, 200, { roundId: state.round.id, wordAvailable: true });
@@ -446,6 +451,7 @@ async function handleGuess(req, res) {
       submittedAt: Date.now()
     };
     state.round.finishedAt = Date.now();
+    finalizeCurrentRoundStats();
     if (correct) {
       state.score.success += 1;
     } else {
@@ -563,6 +569,7 @@ function removePlayer(playerId) {
         state.round.stage = 'round_result';
         state.round.finishedAt = Date.now();
         state.round.guess = null;
+        finalizeCurrentRoundStats();
       }
     }
   }
@@ -616,7 +623,170 @@ function serializeState() {
       role: player.role
     })),
     round,
-    score: state.score
+    score: state.score,
+    leaderboard: buildLeaderboard()
+  };
+}
+
+function syncPlayerStats(playerId, name) {
+  const stats = getPlayerStats(playerId, name);
+  stats.name = name;
+  stats.lastUpdatedAt = Date.now();
+}
+
+function getPlayerStats(playerId, name = 'Unknown hint-giver') {
+  let stats = playerStats.get(playerId);
+  if (!stats) {
+    stats = {
+      playerId,
+      name,
+      hintsGiven: 0,
+      hintsKept: 0,
+      hintsEliminated: 0,
+      usefulnessSum: 0,
+      usefulnessEntries: 0,
+      roundsParticipated: 0,
+      successfulRounds: 0,
+      bestHints: [],
+      lastUpdatedAt: Date.now()
+    };
+    playerStats.set(playerId, stats);
+  }
+  return stats;
+}
+
+function finalizeCurrentRoundStats() {
+  if (!state.round || state.round.stage !== 'round_result' || state.round.statsApplied) {
+    return;
+  }
+  applyRoundToStats(state.round);
+  state.round.statsApplied = true;
+}
+
+function applyRoundToStats(round) {
+  const guessCorrect = Boolean(round.guess?.correct);
+  const participants = new Set();
+  const finishedAt = round.finishedAt || Date.now();
+  const word = round.word || state.round?.word || null;
+
+  for (const hint of round.hints) {
+    const stats = getPlayerStats(hint.playerId, hint.author);
+    participants.add(hint.playerId);
+
+    stats.hintsGiven += 1;
+    if (hint.invalid) {
+      stats.hintsEliminated += 1;
+    } else {
+      stats.hintsKept += 1;
+    }
+
+    const usefulness = guessCorrect && !hint.invalid ? 1 : 0;
+    stats.usefulnessSum += usefulness;
+    stats.usefulnessEntries += 1;
+
+    if (hint.text && usefulness > 0) {
+      const entry = {
+        text: hint.text,
+        word,
+        correct: guessCorrect,
+        invalid: Boolean(hint.invalid),
+        score: usefulness,
+        recordedAt: finishedAt
+      };
+      stats.bestHints.push(entry);
+      stats.bestHints.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.recordedAt - a.recordedAt;
+      });
+      if (stats.bestHints.length > 5) {
+        stats.bestHints.length = 5;
+      }
+    }
+
+    stats.lastUpdatedAt = finishedAt;
+  }
+
+  for (const playerId of participants) {
+    const stats = getPlayerStats(playerId);
+    stats.roundsParticipated += 1;
+    if (guessCorrect) {
+      stats.successfulRounds += 1;
+    }
+    stats.lastUpdatedAt = finishedAt;
+  }
+}
+
+function buildLeaderboard() {
+  const allStats = Array.from(playerStats.values());
+  if (allStats.length === 0) {
+    return {
+      global: [],
+      room: [],
+      byPlayer: {},
+      updatedAt: Date.now()
+    };
+  }
+
+  const roomHintGiverIds = new Set(state.players.filter(p => p.role === 'hint').map(p => p.id));
+
+  const entries = allStats.map(stats => {
+    const metrics = calculateMetrics(stats);
+    return {
+      playerId: stats.playerId,
+      name: stats.name,
+      metrics,
+      totals: {
+        hintsGiven: stats.hintsGiven,
+        hintsKept: stats.hintsKept,
+        hintsEliminated: stats.hintsEliminated,
+        roundsParticipated: stats.roundsParticipated,
+        successfulRounds: stats.successfulRounds
+      },
+      playerScore: metrics.playerScore,
+      bestHints: stats.bestHints.slice(0, 3),
+      lastUpdatedAt: stats.lastUpdatedAt
+    };
+  });
+
+  const sortEntries = list =>
+    list.sort((a, b) => {
+      if (b.playerScore !== a.playerScore) return b.playerScore - a.playerScore;
+      if (b.metrics.cus !== a.metrics.cus) return b.metrics.cus - a.metrics.cus;
+      return a.name.localeCompare(b.name);
+    });
+
+  const rankedEntries = entries.filter(entry => entry.totals.hintsGiven > 0);
+
+  const global = sortEntries(rankedEntries.slice());
+  const room = sortEntries(rankedEntries.filter(entry => roomHintGiverIds.has(entry.playerId)));
+
+  const byPlayer = {};
+  for (const entry of entries) {
+    byPlayer[entry.playerId] = entry;
+  }
+
+  return {
+    global,
+    room,
+    byPlayer,
+    updatedAt: Date.now()
+  };
+}
+
+function calculateMetrics(stats) {
+  const cusRaw = stats.usefulnessEntries === 0 ? 0 : (stats.usefulnessSum / stats.usefulnessEntries) * 100;
+  const hsrRaw = stats.hintsGiven === 0 ? 0 : (stats.hintsKept / stats.hintsGiven) * 100;
+  const garRaw = stats.roundsParticipated === 0 ? 0 : (stats.successfulRounds / stats.roundsParticipated) * 100;
+  const efRaw = 100 - hsrRaw;
+
+  const playerScoreRaw = (cusRaw * 0.5) + (hsrRaw * 0.3) + (garRaw * 0.2);
+
+  return {
+    cus: Number(cusRaw.toFixed(1)),
+    hsr: Number(hsrRaw.toFixed(1)),
+    gar: Number(garRaw.toFixed(1)),
+    ef: Number(efRaw.toFixed(1)),
+    playerScore: Number(playerScoreRaw.toFixed(1))
   };
 }
 
