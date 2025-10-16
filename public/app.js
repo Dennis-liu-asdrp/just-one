@@ -835,6 +835,8 @@ function formatMetricValue(raw) {
   const numeric = typeof raw === 'number' ? raw : Number(raw ?? 0);
   if (!Number.isFinite(numeric)) return '0';
   return numeric.toFixed(1).replace(/\.0$/, '');
+}
+
 function setupButtonFeedback() {
   if (buttonFeedbackInitialized) return;
   buttonFeedbackInitialized = true;
