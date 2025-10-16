@@ -35,7 +35,6 @@ function init() {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
-  setupButtonFeedback();
 }
 
 async function restorePlayer() {
@@ -319,10 +318,10 @@ function renderControls() {
 
   const round = serverState.round;
   if (!round) {
-    const prompt = document.createElement('div');
-    prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
-    controlsEl.appendChild(prompt);
-    controlsEl.appendChild(buildButton('Start new round', () => startRound()));
+    if (player.role === 'hint') {
+      controlsEl.appendChild(buildButton('Start new round', () => startRound()));
+    }
+    setControlsMessage('Waiting for a hint giver to start the first round.');
     return;
   }
 
@@ -374,7 +373,6 @@ function renderControls() {
       controlsEl.appendChild(prompt);
       controlsEl.appendChild(buildButton('Start next round', () => startRound()));
       break;
-    }
     default:
       controlsEl.innerHTML = '';
   }
@@ -470,7 +468,7 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
-  }
+    }
   } else if (player.role === 'guesser' && stage !== 'round_result') {
     const placeholder = document.createElement('div');
     placeholder.className = 'info-card subtle';
