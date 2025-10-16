@@ -29,6 +29,8 @@ let fetchWordInFlight = false;
 let lastKnownRoundId = null;
 let lastKnownStage = null;
 let currentWord = null;
+let buttonFeedbackInitialized = false;
+let audioContext = null;
 
 init();
 
@@ -49,6 +51,7 @@ function init() {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
+  setupButtonFeedback();
 }
 
 async function restorePlayer() {
@@ -264,37 +267,23 @@ function renderPlayerInfo() {
   }
 
   const summary = document.createElement('div');
+  summary.className = 'identity-summary';
   summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
   playerInfo.appendChild(summary);
 
-  if (!serverState?.round) {
+  const round = serverState?.round;
+
+  if (!round) {
     const prompt = document.createElement('div');
+    prompt.className = 'info-card subtle';
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
+  } else {
+    const notice = document.createElement('div');
+    notice.className = 'roles-locked';
+    notice.textContent = 'Roles are locked until this round is complete.';
+    playerInfo.appendChild(notice);
   }
-
-  const form = document.createElement('form');
-  form.className = 'identity-form';
-  form.innerHTML = `
-    <div class="form-field">
-      <label>
-        <span>Name</span>
-        <input type="text" name="name" maxlength="24" autocomplete="off" value="${escapeHtml(player.name)}" required />
-      </label>
-    </div>
-    <div class="form-field">
-      <label>
-        <span>Role</span>
-        <select name="role">
-          <option value="guesser"${player.role === 'guesser' ? ' selected' : ''}>Guesser</option>
-          <option value="hint"${player.role === 'hint' ? ' selected' : ''}>Hint giver</option>
-        </select>
-      </label>
-    </div>
-    <button type="submit">Update</button>
-  `;
-  form.addEventListener('submit', handleIdentitySubmit);
-  playerInfo.appendChild(form);
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';
@@ -485,14 +474,14 @@ function renderControls() {
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Review collisions', () => beginReview(), round.hints.length === 0));
       } else {
-        controlsEl.textContent = 'Hints are being prepared.';
+        setControlsMessage('Hints are being prepared.');
       }
       break;
     case 'reviewing_hints':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
       } else {
-        controlsEl.textContent = 'Hint givers are resolving collisions.';
+        setControlsMessage('Hint givers are resolving collisions.');
       }
       break;
     case 'awaiting_guess':
@@ -519,7 +508,7 @@ function renderControls() {
         });
         controlsEl.appendChild(form);
       } else {
-        controlsEl.textContent = 'Waiting for the guesser to decide.';
+        setControlsMessage('Waiting for the guesser to decide.');
       }
       break;
     case 'round_result': {
@@ -530,8 +519,16 @@ function renderControls() {
       break;
     }
     default:
-      controlsEl.textContent = '';
+      controlsEl.innerHTML = '';
   }
+}
+
+function setControlsMessage(text) {
+  controlsEl.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'info-card subtle';
+  card.textContent = text;
+  controlsEl.appendChild(card);
 }
 
 function renderRound() {
@@ -540,7 +537,10 @@ function renderRound() {
 
   const round = serverState.round;
   if (!round) {
-    roundEl.innerHTML = '<p>No round in progress yet.</p>';
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No round in progress yet.';
+    roundEl.appendChild(empty);
     return;
   }
 
@@ -551,51 +551,76 @@ function renderRound() {
     roundEl.appendChild(card);
   }
 
+  const stage = round.stage;
+
   if (round.hints.length > 0) {
-    const list = document.createElement('ul');
-    list.className = 'hint-list';
+    const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
 
-    const showTexts = round.stage !== 'collecting_hints' || player.role === 'hint';
-    const hintsForDisplay = round.stage === 'awaiting_guess' ? round.hints.filter(h => !h.invalid) : round.hints;
+    if (guesserWaiting) {
+      const message = document.createElement('div');
+      message.className = 'info-card subtle';
+      message.textContent = stage === 'reviewing_hints'
+        ? 'Hint givers are reviewing collisions. Hang tight!'
+        : 'Hint givers are preparing their clues.';
+      roundEl.appendChild(message);
+    } else {
+      const list = document.createElement('ul');
+      list.className = 'hint-list';
 
-    hintsForDisplay.forEach(hint => {
-      const li = document.createElement('li');
-      li.className = 'hint-item';
-      if (hint.invalid) {
-        li.classList.add('invalid');
-      }
+      const canSeeText = player.role === 'hint'
+        || stage === 'round_result'
+        || (player.role === 'guesser' && stage === 'awaiting_guess');
 
-      const text = showTexts ? escapeHtml(hint.text) : hint.playerId === player.id ? escapeHtml(hint.text) : 'Submitted';
-      const content = document.createElement('div');
-      content.innerHTML = `<div>${text}</div>`;
-      if (player.role === 'hint') {
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = hint.author;
-        content.appendChild(meta);
-      }
+      const hintsForDisplay = player.role === 'guesser' && stage === 'awaiting_guess'
+        ? round.hints.filter(h => !h.invalid)
+        : round.hints;
 
-      li.appendChild(content);
+      hintsForDisplay.forEach(hint => {
+        const li = document.createElement('li');
+        li.className = 'hint-item';
+        if (hint.invalid) {
+          li.classList.add('invalid');
+        }
 
-      if (player.role === 'hint' && round.stage === 'reviewing_hints') {
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.textContent = hint.invalid ? 'Restore' : 'Eliminate';
-        toggle.addEventListener('click', () => toggleHint(hint));
-        li.appendChild(toggle);
-      }
+        const text = canSeeText ? escapeHtml(hint.text) : hint.playerId === player.id ? escapeHtml(hint.text) : 'Hidden';
+        const content = document.createElement('div');
+        content.innerHTML = `<div>${text}</div>`;
+        if (player.role === 'hint') {
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = hint.author;
+          content.appendChild(meta);
+        }
 
-      if (round.stage === 'awaiting_guess' && player.role === 'guesser') {
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = 'Valid clue';
-        li.appendChild(meta);
-      }
+        li.appendChild(content);
 
-      list.appendChild(li);
-    });
+        if (player.role === 'hint' && stage === 'reviewing_hints') {
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.textContent = hint.invalid ? 'Restore' : 'Eliminate';
+          toggle.addEventListener('click', () => toggleHint(hint));
+          li.appendChild(toggle);
+        }
 
-    roundEl.appendChild(list);
+        if (stage === 'awaiting_guess' && player.role === 'guesser') {
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = 'Valid clue';
+          li.appendChild(meta);
+        }
+
+        list.appendChild(li);
+      });
+
+      roundEl.appendChild(list);
+  }
+  } else if (player.role === 'guesser' && stage !== 'round_result') {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'info-card subtle';
+    placeholder.textContent = stage === 'reviewing_hints'
+      ? 'Hint givers are reviewing clues before revealing them.'
+      : 'Waiting for hint givers to submit their clues.';
+    roundEl.appendChild(placeholder);
   }
 
   if (round.stage === 'collecting_hints' && player.role === 'hint') {
@@ -758,38 +783,6 @@ async function handleCopyShareLink() {
   }
 }
 
-async function handleIdentitySubmit(event) {
-  event.preventDefault();
-  if (!player) return;
-  const form = event.currentTarget;
-  const formData = new FormData(form);
-  const name = (formData.get('name') || '').toString().trim();
-  const role = formData.get('role');
-  if (!name) {
-    showMessage('Name cannot be empty.', 'error');
-    return;
-  }
-  if (!role) {
-    showMessage('Select a role.', 'error');
-    return;
-  }
-  try {
-    const { player: updated } = await apiPost('/api/join', {
-      playerId: player.id,
-      name,
-      role
-    });
-    player = updated;
-    localStorage.setItem('just-one-player', JSON.stringify(updated));
-    nameInput.value = updated.name;
-    roleSelect.value = updated.role;
-    showMessage('Profile updated.');
-    updateLayout();
-  } catch (err) {
-    // handled by apiPost
-  }
-}
-
 async function handleLeaveTable() {
   if (!player) return;
   const leavingId = player.id;
@@ -842,6 +835,59 @@ function formatMetricValue(raw) {
   const numeric = typeof raw === 'number' ? raw : Number(raw ?? 0);
   if (!Number.isFinite(numeric)) return '0';
   return numeric.toFixed(1).replace(/\.0$/, '');
+function setupButtonFeedback() {
+  if (buttonFeedbackInitialized) return;
+  buttonFeedbackInitialized = true;
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (!button || button.disabled) return;
+    triggerButtonPulse(button);
+    playClickSound();
+  });
+}
+
+function triggerButtonPulse(button) {
+  if (isMotionReduced()) return;
+  button.classList.remove('pulse');
+  void button.offsetWidth;
+  button.classList.add('pulse');
+  window.setTimeout(() => {
+    button.classList.remove('pulse');
+  }, 280);
+}
+
+function playClickSound() {
+  if (isMotionReduced()) return;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    if (!audioContext || audioContext.state === 'closed') {
+      audioContext = new AudioContextClass();
+    }
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
+    const now = audioContext.currentTime;
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = 'triangle';
+    oscillator.frequency.setValueAtTime(420, now);
+    oscillator.frequency.exponentialRampToValueAtTime(640, now + 0.14);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.25);
+  } catch (err) {
+    // Swallow audio errors silently (autoplay restrictions, etc.).
+  }
+}
+
+function isMotionReduced() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 function escapeHtml(value) {
