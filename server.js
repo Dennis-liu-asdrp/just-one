@@ -574,6 +574,9 @@ async function handleLeave(req, res) {
       return;
     }
     removePlayer(playerId);
+    if (state.players.length === 0) {
+      resetGameStateToDefaults();
+    }
     respond(res, 200, { success: true });
     broadcastState();
   } catch (err) {
@@ -640,6 +643,14 @@ function removePlayer(playerId) {
       }
     }
   }
+}
+
+function resetGameStateToDefaults() {
+  state.round = null;
+  state.score = { success: 0, failure: 0 };
+  state.wordDeck = shuffle([...words]);
+  state.lastWord = null;
+  state.settings.difficulty = 'easy';
 }
 
 function touchPlayer(player) {
