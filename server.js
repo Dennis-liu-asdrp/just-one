@@ -677,7 +677,7 @@ async function handleResetGame(req, res) {
     }
     touchPlayer(player);
 
-    if (state.round) {
+    if (state.round && !state.gameOver) {
       respond(res, 409, { error: 'Wait for the current round to finish before resetting' });
       return;
     }
