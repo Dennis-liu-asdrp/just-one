@@ -1081,6 +1081,7 @@ async function handleResetGame() {
   try {
     await apiPost('/api/game/reset', { playerId: player.id });
     showMessage('Game reset. Ready for a new round.');
+    updateLayout();
   } catch (err) {
     // message already surfaced
   }

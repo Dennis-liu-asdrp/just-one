@@ -708,6 +708,7 @@ function resetGameProgress() {
   state.gameOverReason = null;
   state.endGameVotes.clear();
   state.round = null;
+  state.score = { success: 0, failure: 0 };
 }
 
 function evaluateEndGameVotes() {
