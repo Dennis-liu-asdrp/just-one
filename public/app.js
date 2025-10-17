@@ -13,6 +13,7 @@ const messagesEl = document.getElementById('messages');
 const roundProgressEl = document.getElementById('round-progress');
 const endGameButton = document.getElementById('end-game-button');
 const endGameStatus = document.getElementById('end-game-status');
+const resetGameButton = document.getElementById('reset-game-button');
 const settingsButton = document.getElementById('settings-button');
 const settingsModal = document.getElementById('settings-modal');
 const settingsModalClose = document.getElementById('settings-modal-close');
@@ -57,6 +58,9 @@ function init() {
   });
   if (endGameButton) {
     endGameButton.addEventListener('click', handleEndGameToggle);
+  }
+  if (resetGameButton) {
+    resetGameButton.addEventListener('click', handleResetGame);
   }
   setupSettings();
   restorePlayer().catch(err => {
@@ -417,6 +421,7 @@ function renderEndGameControls() {
     endGameButton.disabled = true;
     endGameButton.textContent = 'End game early';
     endGameStatus.textContent = '';
+    if (resetGameButton) resetGameButton.classList.add('hidden');
     return;
   }
 
@@ -432,6 +437,10 @@ function renderEndGameControls() {
     endGameStatus.textContent = game.gameOverReason === 'completed'
       ? `All ${game.roundsCompleted}/${game.totalRounds} rounds completed.`
       : 'Ended early by player votes.';
+    if (resetGameButton) {
+      resetGameButton.classList.remove('hidden');
+      resetGameButton.disabled = !player;
+    }
     return;
   }
 
@@ -442,6 +451,9 @@ function renderEndGameControls() {
     ? `Votes to end: ${votes}/${totalPlayers}`
     : 'Waiting for players to join.';
   endGameStatus.textContent = canVote ? baseStatus : `${baseStatus}${player ? '' : ' (join to vote)'}`;
+  if (resetGameButton) {
+    resetGameButton.classList.add('hidden');
+  }
 }
 
 function renderSettingsButtonState() {
@@ -1058,6 +1070,19 @@ async function handleInviteFriends() {
     throw new Error('Copy not supported');
   } catch (err) {
     showMessage('Copy failed. Copy the link manually from the address bar.', 'error');
+  }
+}
+
+async function handleResetGame() {
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  try {
+    await apiPost('/api/game/reset', { playerId: player.id });
+    showMessage('Game reset. Ready for a new round.');
+  } catch (err) {
+    // message already surfaced
   }
 }
 

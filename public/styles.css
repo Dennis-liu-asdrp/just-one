@@ -287,6 +287,25 @@ button.pulse {
   color: var(--text-primary);
 }
 
+#reset-game-button {
+  width: auto;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(45, 212, 191, 0.18);
+  color: #99f6e4;
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  box-shadow: none;
+}
+
+#reset-game-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(45, 212, 191, 0.25);
+}
+
+#reset-game-button.hidden {
+  display: none;
+}
+
 #end-game-button {
   width: auto;
   padding: 10px 16px;

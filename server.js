@@ -99,6 +99,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/game/reset' && req.method === 'POST') {
+    await handleResetGame(req, res);
+    return;
+  }
+
   if (pathname === '/api/round/start' && req.method === 'POST') {
     await handleStartRound(req, res);
     return;
@@ -657,6 +662,33 @@ async function handleToggleEndVote(req, res) {
     if (!ended) {
       broadcastState();
     }
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
+async function handleResetGame(req, res) {
+  try {
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    if (state.round) {
+      respond(res, 409, { error: 'Wait for the current round to finish before resetting' });
+      return;
+    }
+
+    resetGameProgress();
+    state.score = { success: 0, failure: 0 };
+    state.wordDeck = shuffle([...words]);
+    state.lastWord = null;
+    endGame('reset', { broadcast: false });
+    broadcastState();
+    respond(res, 200, { success: true });
   } catch (err) {
     respond(res, 400, { error: err.message });
   }
