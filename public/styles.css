@@ -135,17 +135,65 @@ label span {
   color: var(--text-secondary);
 }
 
+.avatar-picker-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(15, 23, 42, 0.42);
+  color: var(--text-primary);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  box-shadow: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.avatar-picker-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.18);
+  box-shadow: 0 18px 30px rgba(56, 189, 248, 0.25);
+}
+
+.avatar-picker-button:focus-visible {
+  outline: 3px solid rgba(56, 189, 248, 0.35);
+  outline-offset: 2px;
+}
+
+.avatar-picker-button::after {
+  content: '▾';
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.avatar-picker-button.is-open::after {
+  transform: rotate(180deg);
+}
+
+.avatar-picker-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.02rem;
+}
+
 .avatar-options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+  gap: 12px;
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .avatar-option {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 52px;
+  height: 56px;
   border-radius: 14px;
   padding: 0;
   background: rgba(15, 23, 42, 0.45);
@@ -174,6 +222,128 @@ label span {
 .avatar-option:focus-visible {
   outline: 3px solid rgba(56, 189, 248, 0.35);
   outline-offset: 2px;
+}
+
+.avatar-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 40;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.avatar-modal.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.avatar-modal.is-hiding {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.avatar-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.35), transparent 65%),
+    radial-gradient(circle at 80% 25%, rgba(124, 58, 237, 0.35), transparent 55%),
+    rgba(8, 11, 20, 0.82);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.avatar-modal.is-visible .avatar-modal-backdrop {
+  opacity: 1;
+}
+
+.avatar-modal.is-hiding .avatar-modal-backdrop {
+  opacity: 0;
+}
+
+.avatar-modal-panel {
+  position: relative;
+  width: min(460px, 100%);
+  background: var(--surface-strong);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 32px 60px rgba(6, 10, 30, 0.6);
+  padding: clamp(26px, 4vw, 36px);
+  transform: translateY(18px) scale(0.94);
+  opacity: 0;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.18s ease;
+}
+
+.avatar-modal.is-visible .avatar-modal-panel {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.avatar-modal.is-hiding .avatar-modal-panel {
+  transform: translateY(18px) scale(0.94);
+  opacity: 0;
+}
+
+.avatar-modal-content {
+  display: grid;
+  gap: 18px;
+}
+
+.avatar-modal-subtitle {
+  margin: -4px 0 0;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.avatar-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.5);
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0;
+  box-shadow: none;
+  transition: transform 0.24s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.avatar-modal-close:hover {
+  transform: rotate(180deg);
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(56, 189, 248, 0.38);
+  color: var(--text-primary);
+}
+
+.avatar-modal-close:focus-visible {
+  outline: 3px solid rgba(56, 189, 248, 0.35);
+  outline-offset: 2px;
+}
+
+.avatar-options::-webkit-scrollbar {
+  width: 6px;
+}
+
+.avatar-options::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 999px;
+}
+
+.avatar-options::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.35);
+  border-radius: 999px;
 }
 
 input, select, button, textarea {

@@ -21,6 +21,10 @@ const personalStatsSection = document.getElementById('personal-stats');
 const leaderboardTabs = leaderboardPanel ? Array.from(leaderboardPanel.querySelectorAll('.leaderboard-tab')) : [];
 const avatarOptionsContainer = document.getElementById('avatar-options');
 const avatarInput = document.getElementById('avatar-input');
+const avatarPickerButton = document.getElementById('avatar-picker-button');
+const avatarPickerCurrent = document.getElementById('avatar-picker-current');
+const avatarModal = document.getElementById('avatar-modal');
+const avatarModalClose = document.getElementById('avatar-modal-close');
 
 let leaderboardView = 'room';
 
@@ -29,7 +33,7 @@ const fallbackAvatars = [
   '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
   '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
 ];
-const defaultAvatar = fallbackAvatars[0];
+const defaultAvatar = '🙂';
 
 let player = null;
 let serverState = null;
@@ -42,6 +46,7 @@ let buttonFeedbackInitialized = false;
 let audioContext = null;
 let availableAvatars = [...fallbackAvatars];
 let selectedAvatar = defaultAvatar;
+let avatarModalOpen = false;
 
 init();
 
@@ -69,6 +74,30 @@ function init() {
 function setupAvatarPicker() {
   if (!avatarOptionsContainer) return;
   renderAvatarOptions();
+  updateAvatarPickerButton();
+
+  if (avatarPickerButton) {
+    avatarPickerButton.addEventListener('click', () => {
+      if (avatarModalOpen) {
+        closeAvatarModal();
+      } else {
+        openAvatarModal();
+      }
+    });
+  }
+
+  if (avatarModal) {
+    avatarModal.addEventListener('click', event => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.dataset.dismiss === 'avatar-modal') {
+        closeAvatarModal();
+      }
+    });
+  }
+
+  if (avatarModalClose) {
+    avatarModalClose.addEventListener('click', () => closeAvatarModal());
+  }
 }
 
 function getAvailableAvatars() {
@@ -77,6 +106,9 @@ function getAvailableAvatars() {
 
 function normalizeAvatarChoice(value) {
   const avatars = getAvailableAvatars();
+  if (value === defaultAvatar) {
+    return defaultAvatar;
+  }
   if (typeof value === 'string' && avatars.includes(value)) {
     return value;
   }
@@ -84,7 +116,7 @@ function normalizeAvatarChoice(value) {
     const fallbackMatch = fallbackAvatars.find(avatar => avatars.includes(avatar));
     if (fallbackMatch) return fallbackMatch;
   }
-  return avatars[0] || fallbackAvatars[0];
+  return avatars[0] || fallbackAvatars[0] || defaultAvatar;
 }
 
 function renderAvatarOptions() {
@@ -101,10 +133,12 @@ function renderAvatarOptions() {
     button.className = 'avatar-option';
     button.dataset.avatar = avatar;
     button.textContent = avatar;
+    button.setAttribute('role', 'option');
     button.setAttribute('aria-label', `Select avatar ${avatar}`);
-    button.setAttribute('aria-pressed', avatar === selectedAvatar ? 'true' : 'false');
+    button.setAttribute('aria-selected', avatar === selectedAvatar ? 'true' : 'false');
     button.addEventListener('click', () => {
       updateSelectedAvatar(avatar);
+      closeAvatarModal();
     });
     avatarOptionsContainer.appendChild(button);
   });
@@ -118,6 +152,7 @@ function updateSelectedAvatar(avatar) {
     avatarInput.value = selectedAvatar;
   }
   highlightSelectedAvatar();
+  updateAvatarPickerButton();
 }
 
 function highlightSelectedAvatar() {
@@ -126,7 +161,8 @@ function highlightSelectedAvatar() {
   buttons.forEach(button => {
     const isActive = button.dataset.avatar === selectedAvatar;
     button.classList.toggle('selected', isActive);
-    button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    button.tabIndex = isActive ? 0 : -1;
   });
 }
 
@@ -137,6 +173,64 @@ function syncAvailableAvatarsFromServer() {
   if (arraysEqual(serverList, availableAvatars)) return;
   availableAvatars = [...serverList];
   renderAvatarOptions();
+}
+
+function updateAvatarPickerButton() {
+  if (!avatarPickerCurrent) return;
+  const label = selectedAvatar === defaultAvatar
+    ? `${defaultAvatar} Guest`
+    : `${selectedAvatar} Avatar`;
+  avatarPickerCurrent.textContent = label;
+  if (avatarPickerButton) {
+    avatarPickerButton.title = `Current avatar: ${label}`;
+  }
+}
+
+function openAvatarModal() {
+  if (!avatarModal) return;
+  renderAvatarOptions();
+  avatarModal.classList.remove('hidden');
+  avatarModal.classList.add('is-visible');
+  avatarModal.classList.remove('is-hiding');
+  avatarModalOpen = true;
+  if (avatarPickerButton) {
+    avatarPickerButton.setAttribute('aria-expanded', 'true');
+    avatarPickerButton.classList.add('is-open');
+  }
+  document.addEventListener('keydown', handleAvatarModalKeydown);
+  window.setTimeout(() => {
+    const active = avatarOptionsContainer?.querySelector('.avatar-option.selected')
+      || avatarOptionsContainer?.querySelector('.avatar-option');
+    if (active instanceof HTMLElement) {
+      active.focus();
+    }
+  }, 20);
+}
+
+function closeAvatarModal() {
+  if (!avatarModal || !avatarModalOpen) return;
+  avatarModal.classList.remove('is-visible');
+  avatarModal.classList.add('is-hiding');
+  avatarModalOpen = false;
+  if (avatarPickerButton) {
+    avatarPickerButton.setAttribute('aria-expanded', 'false');
+    avatarPickerButton.focus({ preventScroll: true });
+    avatarPickerButton.classList.remove('is-open');
+  }
+  document.removeEventListener('keydown', handleAvatarModalKeydown);
+  window.setTimeout(() => {
+    if (!avatarModalOpen) {
+      avatarModal.classList.add('hidden');
+      avatarModal.classList.remove('is-hiding');
+    }
+  }, 260);
+}
+
+function handleAvatarModalKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeAvatarModal();
+  }
 }
 
 async function restorePlayer() {

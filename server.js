@@ -26,10 +26,11 @@ const allowedAvatars = Object.freeze([
   '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
   '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
 ]);
-const defaultAvatar = allowedAvatars[0];
+const defaultAvatar = '🙂';
 
 function normalizeAvatar(value) {
   if (typeof value !== 'string') return defaultAvatar;
+  if (value === defaultAvatar) return defaultAvatar;
   return allowedAvatars.includes(value) ? value : defaultAvatar;
 }
 
