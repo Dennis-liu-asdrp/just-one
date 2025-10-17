@@ -49,11 +49,21 @@
         </aside>
 
         <div id="game-main" class="game-main">
+          <button type="button" id="settings-button" class="settings-button" aria-haspopup="dialog" aria-expanded="false">
+            <span class="settings-icon" aria-hidden="true">⚙️</span>
+            <span class="sr-only">Game settings</span>
+          </button>
+
           <div id="player-info"></div>
 
           <div class="status-bar">
             <div id="stage-indicator"></div>
             <div id="scoreboard"></div>
+            <div class="round-tracker">
+              <div id="round-progress"></div>
+              <button type="button" id="end-game-button">End game early</button>
+              <div id="end-game-status" class="end-game-status"></div>
+            </div>
           </div>
 
           <section id="players"></section>
@@ -62,14 +72,6 @@
 
           <section id="round"></section>
 
-          <section id="share-panel" class="panel subtle hidden">
-            <h3>Invite others</h3>
-            <div class="share-row">
-              <input id="share-link" type="text" readonly />
-              <button type="button" id="copy-share">Copy</button>
-            </div>
-            <p class="hint" id="share-hint">Share this address with friends on your network.</p>
-          </section>
         </div>
       </div>
     </section>
@@ -80,6 +82,23 @@
   <template id="hint-list-template">
     <ul class="hint-list"></ul>
   </template>
+
+  <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="settings-modal-backdrop" data-dismiss="settings-modal"></div>
+    <div class="settings-modal-panel" role="document">
+      <button type="button" id="settings-modal-close" class="settings-modal-close" aria-label="Close settings" data-dismiss="settings-modal">×</button>
+      <form id="settings-form" class="settings-form">
+        <h3 id="settings-modal-title">Game settings</h3>
+        <p class="settings-subtitle">Adjust the table before the next round begins.</p>
+        <label for="settings-total-rounds">
+          <span>Total rounds per game</span>
+          <input type="number" id="settings-total-rounds" name="totalRounds" min="1" max="20" step="1" required />
+        </label>
+        <p class="settings-hint">Choose between 1 and 20 rounds. Settings apply once saved and the next round starts.</p>
+        <button type="submit" class="settings-save">Save settings</button>
+      </form>
+    </div>
+  </div>
 
   <script type="module" src="/app.js"></script>
 </body>

@@ -10,10 +10,14 @@ const playersEl = document.getElementById('players');
 const controlsEl = document.getElementById('controls');
 const roundEl = document.getElementById('round');
 const messagesEl = document.getElementById('messages');
-const sharePanel = document.getElementById('share-panel');
-const shareLinkInput = document.getElementById('share-link');
-const copyShareButton = document.getElementById('copy-share');
-const shareHint = document.getElementById('share-hint');
+const roundProgressEl = document.getElementById('round-progress');
+const endGameButton = document.getElementById('end-game-button');
+const endGameStatus = document.getElementById('end-game-status');
+const settingsButton = document.getElementById('settings-button');
+const settingsModal = document.getElementById('settings-modal');
+const settingsModalClose = document.getElementById('settings-modal-close');
+const settingsForm = document.getElementById('settings-form');
+const settingsTotalRoundsInput = document.getElementById('settings-total-rounds');
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -31,12 +35,16 @@ let lastKnownStage = null;
 let currentWord = null;
 let buttonFeedbackInitialized = false;
 let audioContext = null;
+let settingsModalOpen = false;
+let currentGameConfig = {
+  totalRounds: 10,
+  maxRounds: 20
+};
 
 init();
 
 function init() {
   joinForm.addEventListener('submit', handleJoinSubmit);
-  copyShareButton.addEventListener('click', handleCopyShareLink);
   window.addEventListener('beforeunload', handleBeforeUnload);
   leaderboardTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -47,11 +55,41 @@ function init() {
       renderLeaderboard();
     });
   });
+  if (endGameButton) {
+    endGameButton.addEventListener('click', handleEndGameToggle);
+  }
+  setupSettings();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
   setupButtonFeedback();
+}
+
+function setupSettings() {
+  if (!settingsButton || !settingsModal) return;
+  settingsButton.addEventListener('click', () => {
+    if (settingsModalOpen) {
+      closeSettingsModal();
+    } else {
+      openSettingsModal();
+    }
+  });
+
+  settingsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'settings-modal') {
+      closeSettingsModal();
+    }
+  });
+
+  if (settingsModalClose) {
+    settingsModalClose.addEventListener('click', () => closeSettingsModal());
+  }
+
+  if (settingsForm) {
+    settingsForm.addEventListener('submit', handleSettingsSubmit);
+  }
 }
 
 async function restorePlayer() {
@@ -109,6 +147,8 @@ function openEventStream() {
 }
 
 function onStateChange() {
+  syncSettingsFromServer();
+
   const round = serverState?.round;
   const roundId = round?.id ?? null;
   const stage = round?.stage ?? null;
@@ -120,6 +160,18 @@ function onStateChange() {
     lastKnownStage = stage;
     updateLayout();
     return;
+  }
+
+  if (player && serverState) {
+    const serverPlayerRecord = serverState.players.find(p => p.id === player.id);
+    if (serverPlayerRecord) {
+      const nameChanged = serverPlayerRecord.name !== player.name;
+      const roleChanged = serverPlayerRecord.role !== player.role;
+      if (nameChanged || roleChanged) {
+        player = { ...player, ...serverPlayerRecord };
+        localStorage.setItem('just-one-player', JSON.stringify(player));
+      }
+    }
   }
 
   if (!round) {
@@ -223,8 +275,10 @@ function updateLayout() {
     playersEl.innerHTML = '';
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
-    renderSharePanel();
     renderLeaderboard();
+    renderRoundProgress();
+    renderEndGameControls();
+    renderSettingsButtonState();
     return;
   }
 
@@ -232,30 +286,14 @@ function updateLayout() {
   gameSection.classList.remove('hidden');
 
   renderPlayerInfo();
-  renderSharePanel();
   renderPlayers();
   renderScore();
+  renderRoundProgress();
+  renderEndGameControls();
+  renderSettingsButtonState();
   renderControls();
   renderRound();
   renderLeaderboard();
-}
-
-function renderSharePanel() {
-  if (!sharePanel) return;
-  if (!player) {
-    sharePanel.classList.add('hidden');
-    return;
-  }
-
-  sharePanel.classList.remove('hidden');
-  const origin = window.location.origin;
-  shareLinkInput.value = origin;
-
-  if (/localhost|127\.0\.0\.1/.test(window.location.hostname)) {
-    shareHint.textContent = 'Friends must replace "localhost" with your computer\'s IP address before joining.';
-  } else {
-    shareHint.textContent = 'Share this address with friends so they can join the same table.';
-  }
 }
 
 function renderPlayerInfo() {
@@ -272,11 +310,18 @@ function renderPlayerInfo() {
   playerInfo.appendChild(summary);
 
   const round = serverState?.round;
+  const game = serverState?.game;
 
   if (!round) {
     const prompt = document.createElement('div');
     prompt.className = 'info-card subtle';
-    prompt.textContent = 'Start a round to begin the fun.';
+    if (game?.gameOver) {
+      prompt.textContent = game.gameOverReason === 'completed'
+        ? `Game finished after ${game.roundsCompleted}/${game.totalRounds} rounds.`
+        : 'Game ended early by unanimous vote.';
+    } else {
+      prompt.textContent = 'Start a round to begin the fun.';
+    }
     playerInfo.appendChild(prompt);
   } else {
     const notice = document.createElement('div');
@@ -287,6 +332,11 @@ function renderPlayerInfo() {
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';
+  const inviteButton = document.createElement('button');
+  inviteButton.type = 'button';
+  inviteButton.textContent = 'Invite friends';
+  inviteButton.addEventListener('click', handleInviteFriends);
+  actions.appendChild(inviteButton);
   const leaveButton = document.createElement('button');
   leaveButton.type = 'button';
   leaveButton.textContent = 'Leave table';
@@ -316,7 +366,10 @@ function renderPlayers() {
 }
 
 function renderPlayerBadge(playerRecord) {
-  return `<span>${escapeHtml(playerRecord.name)}</span>`;
+  const voted = Boolean(playerRecord?.votedToEnd);
+  const extraClass = voted ? ' has-voted' : '';
+  const suffix = voted ? '<span class="player-vote-indicator">🛑</span>' : '';
+  return `<span class="player-name-pill${extraClass}">${escapeHtml(playerRecord.name)}${suffix}</span>`;
 }
 
 function renderScore() {
@@ -325,10 +378,82 @@ function renderScore() {
     scoreboardEl.textContent = '';
     return;
   }
-  const stage = serverState.round?.stage ?? 'waiting';
-  stageIndicator.textContent = formatStage(stage);
+  const round = serverState.round;
+  const game = serverState.game;
+  if (game?.gameOver) {
+    stageIndicator.textContent = game.gameOverReason === 'completed'
+      ? 'Game finished'
+      : 'Game ended early';
+  } else {
+    const stage = round?.stage ?? 'waiting';
+    stageIndicator.textContent = formatStage(stage);
+  }
   const { success, failure } = serverState.score;
   scoreboardEl.textContent = `Score: ${success} correct · ${failure} misses`;
+}
+
+function renderRoundProgress() {
+  if (!roundProgressEl) return;
+  if (!serverState?.game) {
+    roundProgressEl.textContent = '';
+    return;
+  }
+  const { totalRounds = 0, roundsCompleted = 0 } = serverState.game;
+  if (!totalRounds) {
+    roundProgressEl.textContent = '';
+    return;
+  }
+  const roundActive = Boolean(serverState.round) && !serverState.game.gameOver;
+  const displayNumber = Math.min(totalRounds, roundActive ? roundsCompleted + 1 : roundsCompleted);
+  const label = roundActive
+    ? `Round ${displayNumber}/${totalRounds} (in progress)`
+    : `Round ${roundsCompleted}/${totalRounds}`;
+  roundProgressEl.textContent = label;
+}
+
+function renderEndGameControls() {
+  if (!endGameButton || !endGameStatus) return;
+  if (!serverState?.game) {
+    endGameButton.disabled = true;
+    endGameButton.textContent = 'End game early';
+    endGameStatus.textContent = '';
+    return;
+  }
+
+  const game = serverState.game;
+  const totalPlayers = serverState.players.length;
+  const votes = Number(game.endGameVotes?.count ?? 0);
+  const playerRecord = player ? serverState.players.find(p => p.id === player.id) : null;
+  const hasVoted = Boolean(playerRecord?.votedToEnd);
+
+  if (game.gameOver) {
+    endGameButton.disabled = true;
+    endGameButton.textContent = 'Game ended';
+    endGameStatus.textContent = game.gameOverReason === 'completed'
+      ? `All ${game.roundsCompleted}/${game.totalRounds} rounds completed.`
+      : 'Ended early by player votes.';
+    return;
+  }
+
+  const canVote = Boolean(player) && totalPlayers > 0;
+  endGameButton.disabled = !canVote;
+  endGameButton.textContent = hasVoted ? 'Withdraw vote' : 'End game early';
+  const baseStatus = totalPlayers > 0
+    ? `Votes to end: ${votes}/${totalPlayers}`
+    : 'Waiting for players to join.';
+  endGameStatus.textContent = canVote ? baseStatus : `${baseStatus}${player ? '' : ' (join to vote)'}`;
+}
+
+function renderSettingsButtonState() {
+  if (!settingsButton) return;
+  const canEdit = Boolean(player) && !serverState?.round;
+  settingsButton.disabled = !canEdit;
+  settingsButton.title = canEdit
+    ? 'Adjust game settings'
+    : 'Settings available between rounds';
+  if (!canEdit && settingsModalOpen) {
+    closeSettingsModal(true);
+  }
 }
 
 function renderLeaderboard() {
@@ -461,11 +586,23 @@ function renderControls() {
   if (!player || !serverState) return;
 
   const round = serverState.round;
+  const game = serverState.game;
   if (!round) {
     const prompt = document.createElement('div');
-    prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
+    const gameOver = Boolean(game?.gameOver);
+    if (gameOver) {
+      const reason = game.gameOverReason === 'completed'
+        ? `Game complete after ${game.roundsCompleted}/${game.totalRounds} rounds.`
+        : 'Game ended early by unanimous vote.';
+      prompt.className = 'info-card subtle';
+      prompt.textContent = `${reason} Update settings to start a new game.`;
+    } else {
+      prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
+    }
     controlsEl.appendChild(prompt);
-    controlsEl.appendChild(buildButton('Start new round', () => startRound()));
+    const startButton = buildButton('Start new round', () => startRound());
+    startButton.disabled = Boolean(game?.gameOver);
+    controlsEl.appendChild(startButton);
     return;
   }
 
@@ -542,6 +679,13 @@ function renderRound() {
     empty.textContent = 'No round in progress yet.';
     roundEl.appendChild(empty);
     return;
+  }
+
+  if (typeof round.number === 'number') {
+    const badge = document.createElement('div');
+    badge.className = 'round-number-badge';
+    badge.textContent = `Round ${round.number}`;
+    roundEl.appendChild(badge);
   }
 
   if (player.role === 'hint' && currentWord) {
@@ -762,24 +906,158 @@ function showMessage(text, type = 'info') {
   }, 3000);
 }
 
-async function handleCopyShareLink() {
-  const value = shareLinkInput.value;
+function openSettingsModal() {
+  if (!settingsModal || !settingsButton) return;
+  if (!canEditSettings()) {
+    showMessage('Finish the current round before updating settings.', 'error');
+    return;
+  }
+  settingsModal.classList.remove('hidden');
+  settingsModal.classList.remove('is-hiding');
+  settingsModal.classList.add('is-visible');
+  settingsModalOpen = true;
+  settingsButton.setAttribute('aria-expanded', 'true');
+  if (settingsTotalRoundsInput) {
+    settingsTotalRoundsInput.value = String(currentGameConfig.totalRounds ?? 10);
+    settingsTotalRoundsInput.focus({ preventScroll: true });
+    settingsTotalRoundsInput.select();
+  }
+  document.addEventListener('keydown', handleSettingsKeydown);
+}
+
+function closeSettingsModal(force = false) {
+  if (!settingsModal || !settingsButton || !settingsModalOpen) {
+    if (force && settingsModal) {
+      settingsModal.classList.add('hidden');
+      settingsModal.classList.remove('is-visible');
+      settingsModal.classList.remove('is-hiding');
+    }
+    return;
+  }
+  settingsModal.classList.remove('is-visible');
+  if (force) {
+    settingsModal.classList.add('hidden');
+    settingsModal.classList.remove('is-hiding');
+  } else {
+    settingsModal.classList.add('is-hiding');
+    window.setTimeout(() => {
+      if (!settingsModalOpen) {
+        settingsModal.classList.add('hidden');
+        settingsModal.classList.remove('is-hiding');
+      }
+    }, 240);
+  }
+  settingsModalOpen = false;
+  settingsButton.setAttribute('aria-expanded', 'false');
+  if (!force) {
+    settingsButton.focus({ preventScroll: true });
+  }
+  document.removeEventListener('keydown', handleSettingsKeydown);
+}
+
+function handleSettingsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeSettingsModal();
+  }
+}
+
+async function handleSettingsSubmit(event) {
+  event.preventDefault();
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  if (!settingsTotalRoundsInput) return;
+  const rawValue = Number(settingsTotalRoundsInput.value);
+  if (!Number.isFinite(rawValue) || rawValue < 1 || rawValue > (currentGameConfig.maxRounds ?? 20)) {
+    showMessage('Choose a number of rounds between 1 and 20.', 'error');
+    return;
+  }
+  const totalRounds = Math.round(rawValue);
+  try {
+    await apiPost('/api/game/settings', {
+      playerId: player.id,
+      totalRounds
+    });
+    showMessage(`Game set to ${totalRounds} rounds.`);
+    closeSettingsModal();
+  } catch (err) {
+    // message already surfaced by apiPost
+  }
+}
+
+function syncSettingsFromServer() {
+  const game = serverState?.game;
+  if (!game) return;
+  const nextTotal = Number.isFinite(game.totalRounds) ? Number(game.totalRounds) : currentGameConfig.totalRounds;
+  const nextMax = Number.isFinite(game.maxRounds) ? Number(game.maxRounds) : currentGameConfig.maxRounds;
+  const changed = nextTotal !== currentGameConfig.totalRounds || nextMax !== currentGameConfig.maxRounds;
+  currentGameConfig = {
+    totalRounds: nextTotal,
+    maxRounds: nextMax
+  };
+  if (settingsTotalRoundsInput) {
+    settingsTotalRoundsInput.max = String(currentGameConfig.maxRounds);
+  }
+  if (changed && settingsModalOpen && settingsTotalRoundsInput) {
+    settingsTotalRoundsInput.value = String(currentGameConfig.totalRounds);
+  }
+}
+
+function canEditSettings() {
+  return Boolean(player) && !serverState?.round;
+}
+
+async function handleEndGameToggle() {
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  if (!serverState?.game) return;
+  if (serverState.game.gameOver) {
+    showMessage('Game already ended.', 'error');
+    return;
+  }
+
+  const playerRecord = serverState.players.find(p => p.id === player.id);
+  const hasVoted = Boolean(playerRecord?.votedToEnd);
+  try {
+    await apiPost('/api/game/end-vote', {
+      playerId: player.id,
+      vote: !hasVoted
+    });
+    showMessage(!hasVoted ? 'Vote recorded.' : 'Vote withdrawn.');
+  } catch (err) {
+    // message surfaced
+  }
+}
+
+async function handleInviteFriends() {
+  const value = window.location.href;
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(value);
-      showMessage('Link copied to clipboard.');
-    } else {
-      shareLinkInput.focus();
-      shareLinkInput.select();
-      const ok = document.execCommand('copy');
-      if (ok) {
-        showMessage('Link copied to clipboard.');
-      } else {
-        throw new Error('Copy not supported');
-      }
+      showMessage('Invite link copied to clipboard.');
+      return;
     }
+
+    const tempInput = document.createElement('input');
+    tempInput.value = value;
+    tempInput.setAttribute('readonly', '');
+    tempInput.style.position = 'absolute';
+    tempInput.style.left = '-9999px';
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(tempInput);
+    if (ok) {
+      showMessage('Invite link copied to clipboard.');
+      return;
+    }
+    throw new Error('Copy not supported');
   } catch (err) {
-    showMessage('Copy failed. You can copy the link manually.', 'error');
+    showMessage('Copy failed. Copy the link manually from the address bar.', 'error');
   }
 }
 
