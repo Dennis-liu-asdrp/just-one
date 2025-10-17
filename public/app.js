@@ -10,10 +10,12 @@ const playersEl = document.getElementById('players');
 const controlsEl = document.getElementById('controls');
 const roundEl = document.getElementById('round');
 const messagesEl = document.getElementById('messages');
-const sharePanel = document.getElementById('share-panel');
-const shareLinkInput = document.getElementById('share-link');
-const copyShareButton = document.getElementById('copy-share');
-const shareHint = document.getElementById('share-hint');
+const settingsButton = document.getElementById('settings-button');
+const settingsModal = document.getElementById('settings-modal');
+const settingsModalClose = document.getElementById('settings-modal-close');
+const settingsModalDismiss = document.getElementById('settings-modal-dismiss');
+const settingsForm = document.getElementById('settings-form');
+const difficultyInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-difficulty"]')) : [];
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -31,12 +33,14 @@ let lastKnownStage = null;
 let currentWord = null;
 let buttonFeedbackInitialized = false;
 let audioContext = null;
+let settingsModalOpen = false;
+let shouldAutoOpenSettings = false;
+let currentSettings = { difficulty: 'easy' };
 
 init();
 
 function init() {
   joinForm.addEventListener('submit', handleJoinSubmit);
-  copyShareButton.addEventListener('click', handleCopyShareLink);
   window.addEventListener('beforeunload', handleBeforeUnload);
   leaderboardTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -47,11 +51,13 @@ function init() {
       renderLeaderboard();
     });
   });
+  setupSettings();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
   setupButtonFeedback();
+  renderSettingsButtonState();
 }
 
 async function restorePlayer() {
@@ -75,6 +81,7 @@ async function restorePlayer() {
     const { player: refreshed } = await silentlyRejoin(stored);
     player = refreshed;
     localStorage.setItem('just-one-player', JSON.stringify(refreshed));
+    shouldAutoOpenSettings = true;
   } catch (err) {
     console.warn('Failed to restore session', err);
     localStorage.removeItem('just-one-player');
@@ -109,6 +116,8 @@ function openEventStream() {
 }
 
 function onStateChange() {
+  syncSettingsFromServer();
+
   const round = serverState?.round;
   const roundId = round?.id ?? null;
   const stage = round?.stage ?? null;
@@ -206,6 +215,7 @@ async function handleJoinSubmit(event) {
     player = joined;
     localStorage.setItem('just-one-player', JSON.stringify(joined));
     roleSelect.value = joined.role;
+    shouldAutoOpenSettings = true;
     updateLayout();
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
@@ -223,8 +233,9 @@ function updateLayout() {
     playersEl.innerHTML = '';
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
-    renderSharePanel();
     renderLeaderboard();
+    closeSettingsModal(true);
+    renderSettingsButtonState();
     return;
   }
 
@@ -232,30 +243,13 @@ function updateLayout() {
   gameSection.classList.remove('hidden');
 
   renderPlayerInfo();
-  renderSharePanel();
   renderPlayers();
   renderScore();
   renderControls();
   renderRound();
   renderLeaderboard();
-}
-
-function renderSharePanel() {
-  if (!sharePanel) return;
-  if (!player) {
-    sharePanel.classList.add('hidden');
-    return;
-  }
-
-  sharePanel.classList.remove('hidden');
-  const origin = window.location.origin;
-  shareLinkInput.value = origin;
-
-  if (/localhost|127\.0\.0\.1/.test(window.location.hostname)) {
-    shareHint.textContent = 'Friends must replace "localhost" with your computer\'s IP address before joining.';
-  } else {
-    shareHint.textContent = 'Share this address with friends so they can join the same table.';
-  }
+  renderSettingsButtonState();
+  maybeAutoOpenSettings();
 }
 
 function renderPlayerInfo() {
@@ -285,8 +279,20 @@ function renderPlayerInfo() {
     playerInfo.appendChild(notice);
   }
 
+  const difficultyNote = document.createElement('div');
+  difficultyNote.className = 'settings-summary';
+  const friendlyDifficulty = currentSettings.difficulty === 'hard' ? 'Hard mode' : 'Easy mode';
+  difficultyNote.textContent = `Difficulty: ${friendlyDifficulty}`;
+  playerInfo.appendChild(difficultyNote);
+
   const actions = document.createElement('div');
   actions.className = 'player-actions';
+  const inviteButton = document.createElement('button');
+  inviteButton.type = 'button';
+  inviteButton.textContent = 'Invite friends';
+  inviteButton.addEventListener('click', handleInviteFriends);
+  actions.appendChild(inviteButton);
+
   const leaveButton = document.createElement('button');
   leaveButton.type = 'button';
   leaveButton.textContent = 'Leave table';
@@ -762,24 +768,170 @@ function showMessage(text, type = 'info') {
   }, 3000);
 }
 
-async function handleCopyShareLink() {
-  const value = shareLinkInput.value;
+async function handleInviteFriends() {
+  const value = window.location.href;
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(value);
-      showMessage('Link copied to clipboard.');
-    } else {
-      shareLinkInput.focus();
-      shareLinkInput.select();
-      const ok = document.execCommand('copy');
-      if (ok) {
-        showMessage('Link copied to clipboard.');
-      } else {
-        throw new Error('Copy not supported');
-      }
+      showMessage('Invite link copied to clipboard.');
+      return;
     }
+
+    const tempInput = document.createElement('input');
+    tempInput.value = value;
+    tempInput.setAttribute('readonly', '');
+    tempInput.style.position = 'absolute';
+    tempInput.style.left = '-9999px';
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(tempInput);
+    if (ok) {
+      showMessage('Invite link copied to clipboard.');
+      return;
+    }
+    throw new Error('Copy not supported');
   } catch (err) {
-    showMessage('Copy failed. You can copy the link manually.', 'error');
+    showMessage('Copy failed. Copy the link manually from the address bar.', 'error');
+  }
+}
+
+function setupSettings() {
+  if (!settingsButton || !settingsModal) return;
+  settingsButton.addEventListener('click', () => {
+    if (settingsModalOpen) {
+      closeSettingsModal();
+    } else {
+      openSettingsModal();
+    }
+  });
+
+  settingsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'settings-modal') {
+      closeSettingsModal();
+    }
+  });
+
+  if (settingsModalClose) {
+    settingsModalClose.addEventListener('click', () => closeSettingsModal());
+  }
+
+  if (settingsModalDismiss) {
+    settingsModalDismiss.addEventListener('click', () => closeSettingsModal());
+  }
+
+  difficultyInputs.forEach(input => {
+    input.addEventListener('change', handleDifficultyChange);
+  });
+}
+
+function openSettingsModal({ auto = false } = {}) {
+  if (!settingsModal || settingsModalOpen) return;
+  settingsModal.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    settingsModal.classList.add('is-visible');
+  });
+  settingsModalOpen = true;
+  shouldAutoOpenSettings = false;
+  if (settingsButton) {
+    settingsButton.setAttribute('aria-expanded', 'true');
+  }
+  applySettingsFormState();
+  document.addEventListener('keydown', handleSettingsKeydown);
+  const activeInput = difficultyInputs.find(input => input.value === currentSettings.difficulty);
+  if (activeInput && !activeInput.disabled) {
+    activeInput.focus({ preventScroll: true });
+  } else if (!auto && settingsModalClose) {
+    settingsModalClose.focus({ preventScroll: true });
+  }
+}
+
+function closeSettingsModal(force = false) {
+  if (!settingsModal) return;
+  if (!settingsModalOpen && !force) return;
+
+  const shouldHideImmediately = force || !settingsModalOpen;
+  settingsModalOpen = false;
+  if (settingsButton) {
+    settingsButton.setAttribute('aria-expanded', 'false');
+  }
+  settingsModal.classList.remove('is-visible');
+  if (shouldHideImmediately) {
+    settingsModal.classList.add('hidden');
+  } else {
+    window.setTimeout(() => {
+      if (!settingsModalOpen) {
+        settingsModal.classList.add('hidden');
+      }
+    }, 220);
+  }
+  document.removeEventListener('keydown', handleSettingsKeydown);
+}
+
+function handleSettingsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeSettingsModal();
+  }
+}
+
+async function handleDifficultyChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'hard' ? 'hard' : 'easy';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === currentSettings.difficulty) {
+    return;
+  }
+  try {
+    await apiPost('/api/settings', {
+      playerId: player.id,
+      difficulty: value
+    });
+    currentSettings.difficulty = value;
+    applySettingsFormState();
+    showMessage(value === 'hard' ? 'Hard mode enabled.' : 'Easy mode enabled.');
+  } catch (err) {
+    applySettingsFormState();
+  }
+}
+
+function applySettingsFormState() {
+  const current = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
+  const roundActive = Boolean(serverState?.round);
+  difficultyInputs.forEach(input => {
+    input.checked = input.value === current;
+    input.disabled = roundActive;
+  });
+}
+
+function syncSettingsFromServer() {
+  const serverSettings = serverState?.settings;
+  if (!serverSettings) return;
+  const difficulty = serverSettings.difficulty === 'hard' ? 'hard' : 'easy';
+  if (difficulty !== currentSettings.difficulty) {
+    currentSettings.difficulty = difficulty;
+    applySettingsFormState();
+  }
+  renderSettingsButtonState();
+}
+
+function renderSettingsButtonState() {
+  if (!settingsButton) return;
+  settingsButton.disabled = !player;
+  settingsButton.title = player
+    ? 'Adjust game settings'
+    : 'Join the table to edit settings';
+}
+
+function maybeAutoOpenSettings() {
+  if (player && shouldAutoOpenSettings && !settingsModalOpen) {
+    openSettingsModal({ auto: true });
   }
 }
 
@@ -795,6 +947,7 @@ async function handleLeaveTable() {
   player = null;
   nameInput.value = '';
   roleSelect.value = '';
+  shouldAutoOpenSettings = false;
   updateLayout();
   showMessage('You left the table.');
 }

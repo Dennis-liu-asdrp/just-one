@@ -26,8 +26,17 @@ const state = {
   round: null,
   score: { success: 0, failure: 0 },
   wordDeck: shuffle([...words]),
-  lastWord: null
+  lastWord: null,
+  settings: {
+    difficulty: 'easy'
+  }
 };
+
+const COMPOUND_PREFIXES = ['after','air','auto','earth','fire','grand','hand','home','inner','light','moon','north','outer','over','rain','shadow','snow','south','space','star','sun','super','under','water','west','wind'];
+const COMPOUND_SUFFIXES = ['craft','field','fire','house','land','light','maker','ship','song','space','sphere','stone','storm','time','town','walk','ward','work'];
+const COMMON_WORD_PARTS = new Set([
+  'ball','book','cloud','dream','forest','gold','heart','light','night','river','road','sky','space','spring','storm','table','watch','wood','world'
+]);
 
 const playerStats = new Map();
 
@@ -76,6 +85,11 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/player/leave' && req.method === 'POST') {
     await handleLeave(req, res);
+    return;
+  }
+
+  if (pathname === '/api/settings' && req.method === 'POST') {
+    await handleUpdateSettings(req, res);
     return;
   }
 
@@ -344,6 +358,14 @@ async function handleSubmitHint(req, res) {
       return;
     }
 
+    if (state.settings.difficulty === 'hard') {
+      const validationError = validateHardModeHint(text);
+      if (validationError) {
+        respond(res, 400, { error: validationError });
+        return;
+      }
+    }
+
     const existing = state.round.hints.find(h => h.playerId === player.id);
     if (existing) {
       existing.text = text;
@@ -559,6 +581,38 @@ async function handleLeave(req, res) {
   }
 }
 
+async function handleUpdateSettings(req, res) {
+  try {
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    const difficultyRaw = typeof body.difficulty === 'string' ? body.difficulty.toLowerCase() : '';
+    const difficulty = difficultyRaw === 'hard' ? 'hard' : difficultyRaw === 'easy' ? 'easy' : null;
+    if (!difficulty) {
+      respond(res, 400, { error: 'Difficulty must be "easy" or "hard"' });
+      return;
+    }
+
+    if (state.round) {
+      respond(res, 409, { error: 'Wait for the current round to finish before updating settings' });
+      return;
+    }
+
+    if (state.settings.difficulty !== difficulty) {
+      state.settings.difficulty = difficulty;
+      broadcastState();
+    }
+    respond(res, 200, { difficulty });
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
 function respond(res, status, payload) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
@@ -661,8 +715,52 @@ function serializeState() {
     })),
     round,
     score: state.score,
-    leaderboard: buildLeaderboard()
+    leaderboard: buildLeaderboard(),
+    settings: {
+      difficulty: state.settings.difficulty
+    }
   };
+}
+
+function validateHardModeHint(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return 'Hint text is required';
+  if (containsMultipleWords(trimmed)) return 'Hint cannot contain more than one word';
+  if (isProperNounWord(trimmed)) return 'Proper nouns are not allowed';
+  return null;
+}
+
+function containsMultipleWords(text) {
+  if (/\s/.test(text)) return true;
+  if (/[\-_/]/.test(text)) return true;
+  if (/[a-z][A-Z]/.test(text)) return true;
+  const alphaOnly = text.replace(/[^A-Za-z]/g, '');
+  if (!alphaOnly) return false;
+  if (alphaOnly.length >= 6 && looksLikeCompoundWord(alphaOnly.toLowerCase())) return true;
+  return false;
+}
+
+function isProperNounWord(word) {
+  const parts = word.split(/[^A-Za-z]+/).filter(Boolean);
+  if (parts.length === 0) return false;
+  return parts.some(part => {
+    if (part.length <= 1) return false;
+    if (/^[A-Z][a-z]+$/.test(part)) return true;
+    if (/^[A-Z]{2,}$/.test(part)) return true;
+    return false;
+  });
+}
+
+function looksLikeCompoundWord(word) {
+  for (const prefix of COMPOUND_PREFIXES) {
+    if (word.startsWith(prefix) && word.length - prefix.length >= 3) {
+      const suffix = word.slice(prefix.length);
+      if (COMPOUND_SUFFIXES.includes(suffix) || COMPOUND_PREFIXES.includes(suffix) || COMMON_WORD_PARTS.has(suffix)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function syncPlayerStats(playerId, name) {

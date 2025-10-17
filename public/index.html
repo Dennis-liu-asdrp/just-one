@@ -49,6 +49,11 @@
         </aside>
 
         <div id="game-main" class="game-main">
+          <button type="button" id="settings-button" class="settings-button" aria-haspopup="dialog" aria-expanded="false">
+            <span class="settings-icon" aria-hidden="true">⚙️</span>
+            <span class="sr-only">Game settings</span>
+          </button>
+
           <div id="player-info"></div>
 
           <div class="status-bar">
@@ -61,15 +66,6 @@
           <section id="controls"></section>
 
           <section id="round"></section>
-
-          <section id="share-panel" class="panel subtle hidden">
-            <h3>Invite others</h3>
-            <div class="share-row">
-              <input id="share-link" type="text" readonly />
-              <button type="button" id="copy-share">Copy</button>
-            </div>
-            <p class="hint" id="share-hint">Share this address with friends on your network.</p>
-          </section>
         </div>
       </div>
     </section>
@@ -80,6 +76,31 @@
   <template id="hint-list-template">
     <ul class="hint-list"></ul>
   </template>
+
+  <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="settings-modal-backdrop" data-dismiss="settings-modal"></div>
+    <div class="settings-modal-panel" role="document">
+      <form id="settings-form" class="settings-form">
+        <header class="settings-header">
+          <h3 id="settings-modal-title">Game settings</h3>
+          <button type="button" id="settings-modal-close" class="settings-modal-close" aria-label="Close settings">×</button>
+        </header>
+        <fieldset class="settings-fieldset">
+          <legend>Difficulty</legend>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="easy" checked />
+            <span>Easy mode</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="hard" />
+            <span>Hard mode</span>
+          </label>
+        </fieldset>
+        <p class="settings-description">Hard mode blocks proper nouns and multi-word hints.</p>
+        <button type="button" id="settings-modal-dismiss" class="settings-dismiss">Close settings</button>
+      </form>
+    </div>
+  </div>
 
   <script type="module" src="/app.js"></script>
 </body>
