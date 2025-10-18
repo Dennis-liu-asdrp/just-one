@@ -18,9 +18,6 @@ const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
 const personalStatsSection = document.getElementById('personal-stats');
-const leaderboardTabs = leaderboardPanel ? Array.from(leaderboardPanel.querySelectorAll('.leaderboard-tab')) : [];
-
-let leaderboardView = 'room';
 
 let player = null;
 let serverState = null;
@@ -38,15 +35,6 @@ function init() {
   joinForm.addEventListener('submit', handleJoinSubmit);
   copyShareButton.addEventListener('click', handleCopyShareLink);
   window.addEventListener('beforeunload', handleBeforeUnload);
-  leaderboardTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      const view = tab.dataset.view === 'global' ? 'global' : 'room';
-      if (view === leaderboardView) return;
-      leaderboardView = view;
-      leaderboardTabs.forEach(btn => btn.classList.toggle('active', btn === tab));
-      renderLeaderboard();
-    });
-  });
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
@@ -336,14 +324,6 @@ function renderLeaderboard() {
   const board = serverState?.leaderboard ?? null;
 
   if (!player || !board) {
-    if (!player) {
-      leaderboardView = 'room';
-      if (leaderboardTabs.length) {
-        leaderboardTabs.forEach(tab => {
-          tab.classList.toggle('active', tab.dataset.view === leaderboardView);
-        });
-      }
-    }
     leaderboardPanel.classList.add('hidden');
     gameColumns.classList.add('single-column');
     leaderboardList.innerHTML = '';
@@ -356,23 +336,13 @@ function renderLeaderboard() {
   leaderboardPanel.classList.remove('hidden');
   gameColumns.classList.remove('single-column');
 
-  if (leaderboardTabs.length) {
-    leaderboardTabs.forEach(tab => {
-      const isActive = tab.dataset.view === leaderboardView;
-      tab.classList.toggle('active', isActive);
-    });
-  }
-
-  const viewKey = leaderboardView === 'global' ? 'global' : 'room';
-  const entries = Array.isArray(board[viewKey]) ? board[viewKey] : [];
+  const entries = Array.isArray(board.entries) ? board.entries : [];
   leaderboardList.innerHTML = '';
 
   if (entries.length === 0) {
     const li = document.createElement('li');
     li.className = 'leaderboard-empty';
-    li.textContent = viewKey === 'room'
-      ? 'No hint data in this room yet — keep those clues coming.'
-      : 'No global hint history yet.';
+    li.textContent = 'No hint data yet — keep those clues coming.';
     leaderboardList.appendChild(li);
   } else {
     entries.slice(0, 10).forEach((entry, index) => {
