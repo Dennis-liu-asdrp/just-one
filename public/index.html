@@ -97,7 +97,18 @@
           </label>
         </fieldset>
         <p class="settings-description">Hard mode blocks proper nouns and multi-word hints.</p>
-        <button type="button" id="settings-modal-dismiss" class="settings-dismiss">Close settings</button>
+        <fieldset class="settings-fieldset">
+          <legend>Change role</legend>
+          <p class="settings-note">Switch roles between rounds. Only one guesser can be active.</p>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="guesser" />
+            <span>Be the guesser</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="hint" checked />
+            <span>Give hints</span>
+          </label>
+        </fieldset>
       </form>
     </div>
   </div>

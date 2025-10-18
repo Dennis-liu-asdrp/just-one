@@ -813,6 +813,12 @@ button.pulse {
   color: var(--text-secondary);
 }
 
+.settings-note {
+  margin: -6px 0 2px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
 .settings-option {
   display: flex;
   align-items: center;
@@ -830,21 +836,6 @@ button.pulse {
   margin: -4px 0 0;
   font-size: 0.9rem;
   color: var(--text-muted);
-}
-
-.settings-dismiss {
-  margin-top: 6px;
-  background: transparent;
-  color: rgba(203, 213, 225, 0.6);
-  border: none;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  align-self: flex-start;
-}
-
-.settings-dismiss:hover {
-  color: rgba(203, 213, 225, 0.9);
 }
 
 .hint {

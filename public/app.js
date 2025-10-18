@@ -13,9 +13,9 @@ const messagesEl = document.getElementById('messages');
 const settingsButton = document.getElementById('settings-button');
 const settingsModal = document.getElementById('settings-modal');
 const settingsModalClose = document.getElementById('settings-modal-close');
-const settingsModalDismiss = document.getElementById('settings-modal-dismiss');
 const settingsForm = document.getElementById('settings-form');
 const difficultyInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-difficulty"]')) : [];
+const roleInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-role"]')) : [];
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -817,12 +817,12 @@ function setupSettings() {
     settingsModalClose.addEventListener('click', () => closeSettingsModal());
   }
 
-  if (settingsModalDismiss) {
-    settingsModalDismiss.addEventListener('click', () => closeSettingsModal());
-  }
-
   difficultyInputs.forEach(input => {
     input.addEventListener('change', handleDifficultyChange);
+  });
+
+  roleInputs.forEach(input => {
+    input.addEventListener('change', handleRoleChange);
   });
 }
 
@@ -901,12 +901,54 @@ async function handleDifficultyChange(event) {
   }
 }
 
+async function handleRoleChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'guesser' ? 'guesser' : 'hint';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (serverState?.round) {
+    showMessage('Finish the current round before changing roles.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === player.role) return;
+
+  try {
+    const { player: updated } = await apiPost('/api/join', {
+      playerId: player.id,
+      name: player.name,
+      role: value
+    });
+    player = updated;
+    localStorage.setItem('just-one-player', JSON.stringify(updated));
+    showMessage(value === 'guesser' ? 'You are now the guesser.' : 'You are now a hint giver.');
+  } catch (err) {
+    // message surfaced by apiPost
+  } finally {
+    applySettingsFormState();
+  }
+}
+
 function applySettingsFormState() {
   const current = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
   const roundActive = Boolean(serverState?.round);
   difficultyInputs.forEach(input => {
     input.checked = input.value === current;
     input.disabled = roundActive;
+  });
+  const currentRole = player?.role === 'guesser' ? 'guesser' : 'hint';
+  const otherGuesserExists = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player?.id));
+  roleInputs.forEach(input => {
+    const isGuesser = input.value === 'guesser';
+    input.checked = input.value === currentRole;
+    const disableBecauseRound = roundActive;
+    const disableBecauseNoPlayer = !player;
+    const disableBecauseTaken = isGuesser && otherGuesserExists && currentRole !== 'guesser';
+    input.disabled = disableBecauseRound || disableBecauseNoPlayer || disableBecauseTaken;
   });
 }
 
@@ -916,8 +958,8 @@ function syncSettingsFromServer() {
   const difficulty = serverSettings.difficulty === 'hard' ? 'hard' : 'easy';
   if (difficulty !== currentSettings.difficulty) {
     currentSettings.difficulty = difficulty;
-    applySettingsFormState();
   }
+  applySettingsFormState();
   renderSettingsButtonState();
 }
 
