@@ -266,13 +266,14 @@ function renderPlayerInfo() {
   playerInfo.appendChild(summary);
 
   const round = serverState?.round;
+  const roundStage = round?.stage ?? null;
 
   if (!round) {
     const prompt = document.createElement('div');
     prompt.className = 'info-card subtle';
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
-  } else {
+  } else if (roundStage && roundStage !== 'round_result') {
     const notice = document.createElement('div');
     notice.className = 'roles-locked';
     notice.textContent = 'Roles are locked until this round is complete.';
@@ -910,7 +911,8 @@ async function handleRoleChange(event) {
     applySettingsFormState();
     return;
   }
-  if (serverState?.round) {
+  const roundStage = serverState?.round?.stage ?? null;
+  if (roundStage && roundStage !== 'round_result') {
     showMessage('Finish the current round before changing roles.', 'error');
     applySettingsFormState();
     return;
@@ -935,7 +937,8 @@ async function handleRoleChange(event) {
 
 function applySettingsFormState() {
   const current = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
-  const roundActive = Boolean(serverState?.round);
+  const roundStage = serverState?.round?.stage ?? null;
+  const roundActive = Boolean(serverState?.round && roundStage !== 'round_result');
   difficultyInputs.forEach(input => {
     input.checked = input.value === current;
     input.disabled = roundActive;
