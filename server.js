@@ -79,6 +79,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/player/role' && req.method === 'POST') {
+    await handleChangeRole(req, res);
+    return;
+  }
+
   if (pathname === '/api/round/start' && req.method === 'POST') {
     await handleStartRound(req, res);
     return;
@@ -231,11 +236,14 @@ async function handleJoin(req, res) {
         respond(res, 409, { error: 'Roles are locked during an active round' });
         return;
       }
+      if (name !== player.name) {
+        respond(res, 409, { error: 'Name changes are not allowed once you join the table' });
+        return;
+      }
       if (role === 'guesser' && roleIsTaken('guesser', player.id)) {
         respond(res, 409, { error: 'Another guesser is already active' });
         return;
       }
-      player.name = name;
       player.role = role;
       player.lastSeenAt = Date.now();
     } else {
@@ -264,6 +272,43 @@ async function handleJoin(req, res) {
 
 function roleIsTaken(role, ignoreId = null) {
   return state.players.some(p => p.role === role && p.id !== ignoreId);
+}
+
+async function handleChangeRole(req, res) {
+  try {
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    const role = body.role === 'guesser' ? 'guesser' : 'hint';
+
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+
+    if (role === player.role) {
+      touchPlayer(player);
+      respond(res, 200, { player });
+      return;
+    }
+
+    if (isRoleChangeLocked()) {
+      respond(res, 409, { error: 'Roles are locked during an active round' });
+      return;
+    }
+
+    if (role === 'guesser' && roleIsTaken('guesser', player.id)) {
+      respond(res, 409, { error: 'Another guesser is already active' });
+      return;
+    }
+
+    player.role = role;
+    touchPlayer(player);
+
+    respond(res, 200, { player });
+    broadcastState();
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
 }
 
 function isRoleChangeLocked() {

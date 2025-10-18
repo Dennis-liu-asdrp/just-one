@@ -453,6 +453,48 @@ button.pulse {
   color: #ffffff;
 }
 
+.role-switcher {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.role-switcher-status {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.role-switcher-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.role-switcher-buttons button {
+  flex: 1 1 180px;
+  min-width: 160px;
+}
+
+.role-switcher-buttons button.current {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.8) 0%, rgba(56, 189, 248, 0.8) 100%);
+  box-shadow: none;
+  cursor: default;
+}
+
+.role-switcher-buttons button.current:disabled {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.8) 0%, rgba(56, 189, 248, 0.8) 100%);
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.role-switcher-helper {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
 .roles-locked {
   margin-top: 6px;
   padding: 12px 16px;

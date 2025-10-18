@@ -29,6 +29,8 @@ let currentWord = null;
 let buttonFeedbackInitialized = false;
 let audioContext = null;
 
+const ROLE_LOCKED_STAGES = ['collecting_hints', 'reviewing_hints', 'awaiting_guess'];
+
 init();
 
 function init() {
@@ -254,23 +256,23 @@ function renderPlayerInfo() {
     return;
   }
 
+  const round = serverState?.round ?? null;
+
   const summary = document.createElement('div');
   summary.className = 'identity-summary';
   summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
   playerInfo.appendChild(summary);
 
-  const round = serverState?.round;
+  const roleSwitcher = buildRoleSwitcher(round);
+  if (roleSwitcher) {
+    playerInfo.appendChild(roleSwitcher);
+  }
 
   if (!round) {
     const prompt = document.createElement('div');
     prompt.className = 'info-card subtle';
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
-  } else {
-    const notice = document.createElement('div');
-    notice.className = 'roles-locked';
-    notice.textContent = 'Roles are locked until this round is complete.';
-    playerInfo.appendChild(notice);
   }
 
   const actions = document.createElement('div');
@@ -281,6 +283,74 @@ function renderPlayerInfo() {
   leaveButton.addEventListener('click', handleLeaveTable);
   actions.appendChild(leaveButton);
   playerInfo.appendChild(actions);
+}
+
+function buildRoleSwitcher(round) {
+  if (!player) return null;
+
+  const container = document.createElement('div');
+  container.className = 'role-switcher';
+
+  const status = document.createElement('div');
+  status.className = 'role-switcher-status';
+  status.textContent = `Current role: ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
+  container.appendChild(status);
+
+  const buttonRow = document.createElement('div');
+  buttonRow.className = 'role-switcher-buttons';
+
+  const locked = isRoleSwitchLocked(round);
+
+  ['guesser', 'hint'].forEach(role => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = role === 'guesser' ? 'Play as Guesser' : 'Play as Hint Giver';
+
+    if (player.role === role) {
+      button.disabled = true;
+      button.classList.add('current');
+      button.setAttribute('aria-pressed', 'true');
+    } else {
+      const unavailable = !canTakeRole(role);
+      button.disabled = locked || unavailable;
+      button.setAttribute('aria-pressed', 'false');
+      if (!button.disabled) {
+        button.addEventListener('click', () => changeRole(role));
+      }
+      if (unavailable && !locked) {
+        button.title = 'That role is already taken.';
+      }
+    }
+
+    buttonRow.appendChild(button);
+  });
+
+  container.appendChild(buttonRow);
+
+  const helper = document.createElement('div');
+  helper.className = 'role-switcher-helper';
+  if (locked) {
+    helper.textContent = 'Finish the current round to change roles.';
+  } else if (!canTakeRole('guesser') && player.role !== 'guesser') {
+    helper.textContent = 'Guesser spot is filled right now.';
+  } else {
+    helper.textContent = 'Switch roles between rounds without leaving the table.';
+  }
+  container.appendChild(helper);
+
+  return container;
+}
+
+function isRoleSwitchLocked(round) {
+  if (!round) return false;
+  return ROLE_LOCKED_STAGES.includes(round.stage);
+}
+
+function canTakeRole(role) {
+  if (role === 'guesser') {
+    return !serverState?.players?.some(p => p.role === 'guesser' && p.id !== player?.id);
+  }
+  return true;
 }
 
 function renderPlayers() {
@@ -767,6 +837,24 @@ async function handleLeaveTable() {
   roleSelect.value = '';
   updateLayout();
   showMessage('You left the table.');
+}
+
+async function changeRole(role) {
+  if (!player || !role || player.role === role) return;
+  try {
+    const { player: updated } = await apiPost('/api/player/role', {
+      playerId: player.id,
+      role
+    });
+    player = updated;
+    localStorage.setItem('just-one-player', JSON.stringify(updated));
+    roleSelect.value = updated.role;
+    currentWord = null;
+    updateLayout();
+    showMessage(`You are now playing as the ${role === 'guesser' ? 'guesser' : 'hint giver'}.`);
+  } catch (err) {
+    // error already surfaced by apiPost
+  }
 }
 
 function handleBeforeUnload() {
