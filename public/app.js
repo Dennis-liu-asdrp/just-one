@@ -10,10 +10,6 @@ const playersEl = document.getElementById('players');
 const controlsEl = document.getElementById('controls');
 const roundEl = document.getElementById('round');
 const messagesEl = document.getElementById('messages');
-const sharePanel = document.getElementById('share-panel');
-const shareLinkInput = document.getElementById('share-link');
-const copyShareButton = document.getElementById('copy-share');
-const shareHint = document.getElementById('share-hint');
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -52,7 +48,6 @@ init();
 
 function init() {
   joinForm.addEventListener('submit', handleJoinSubmit);
-  copyShareButton.addEventListener('click', handleCopyShareLink);
   window.addEventListener('beforeunload', handleBeforeUnload);
   leaderboardTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -424,7 +419,6 @@ function updateLayout() {
     playersEl.innerHTML = '';
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
-    renderSharePanel();
     renderLeaderboard();
     return;
   }
@@ -433,30 +427,11 @@ function updateLayout() {
   gameSection.classList.remove('hidden');
 
   renderPlayerInfo();
-  renderSharePanel();
   renderPlayers();
   renderScore();
   renderControls();
   renderRound();
   renderLeaderboard();
-}
-
-function renderSharePanel() {
-  if (!sharePanel) return;
-  if (!player) {
-    sharePanel.classList.add('hidden');
-    return;
-  }
-
-  sharePanel.classList.remove('hidden');
-  const origin = window.location.origin;
-  shareLinkInput.value = origin;
-
-  if (/localhost|127\.0\.0\.1/.test(window.location.hostname)) {
-    shareHint.textContent = 'Friends must replace "localhost" with your computer\'s IP address before joining.';
-  } else {
-    shareHint.textContent = 'Share this address with friends so they can join the same table.';
-  }
 }
 
 function renderPlayerInfo() {
@@ -502,6 +477,11 @@ function renderPlayerInfo() {
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';
+  const inviteButton = document.createElement('button');
+  inviteButton.type = 'button';
+  inviteButton.textContent = 'Invite friends';
+  inviteButton.addEventListener('click', handleInviteFriends);
+  actions.appendChild(inviteButton);
   const leaveButton = document.createElement('button');
   leaveButton.type = 'button';
   leaveButton.textContent = 'Leave table';
@@ -1071,24 +1051,31 @@ function showMessage(text, type = 'info') {
   }, 3000);
 }
 
-async function handleCopyShareLink() {
-  const value = shareLinkInput.value;
+async function handleInviteFriends() {
+  const value = window.location.origin;
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(value);
-      showMessage('Link copied to clipboard.');
-    } else {
-      shareLinkInput.focus();
-      shareLinkInput.select();
-      const ok = document.execCommand('copy');
-      if (ok) {
-        showMessage('Link copied to clipboard.');
-      } else {
-        throw new Error('Copy not supported');
-      }
+      showMessage('Invite link copied to clipboard.');
+      return;
     }
+
+    const tempInput = document.createElement('input');
+    tempInput.value = value;
+    tempInput.setAttribute('readonly', '');
+    tempInput.style.position = 'absolute';
+    tempInput.style.left = '-9999px';
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(tempInput);
+    if (ok) {
+      showMessage('Invite link copied to clipboard.');
+      return;
+    }
+    throw new Error('Copy not supported');
   } catch (err) {
-    showMessage('Copy failed. You can copy the link manually.', 'error');
+    showMessage('Copy failed. Copy the link manually from the address bar.', 'error');
   }
 }
 
