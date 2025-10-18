@@ -683,10 +683,10 @@ async function handleResetGame(req, res) {
     }
 
     resetGameProgress();
-    state.score = { success: 0, failure: 0 };
     state.wordDeck = shuffle([...words]);
     state.lastWord = null;
-    endGame('reset', { broadcast: false });
+    state.score = { success: 0, failure: 0 };
+    state.settings.difficulty = state.settings.difficulty || 'easy';
     broadcastState();
     respond(res, 200, { success: true });
   } catch (err) {

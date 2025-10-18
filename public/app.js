@@ -1081,10 +1081,9 @@ async function handleResetGame() {
   try {
     await apiPost('/api/game/reset', { playerId: player.id });
     showMessage('Game reset. Ready for a new round.');
+    shouldAutoOpenSettings = false;
     updateLayout();
-  } catch (err) {
-    // message already surfaced
-  }
+  } catch (err) {}
 }
 
 async function handleLeaveTable() {
