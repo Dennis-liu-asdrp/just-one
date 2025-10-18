@@ -20,6 +20,13 @@
           <span>Name</span>
           <input id="name-input" type="text" required maxlength="24" autocomplete="off" />
         </label>
+        <div id="avatar-field" class="avatar-field">
+          <span class="avatar-field-label">Avatar</span>
+          <button type="button" id="avatar-picker-button" class="avatar-picker-button" aria-haspopup="dialog" aria-expanded="false">
+            <span id="avatar-picker-current" class="avatar-picker-current" aria-live="polite">🙂 Guest</span>
+          </button>
+          <input id="avatar-input" type="hidden" name="avatar" />
+        </div>
         <label>
           <span>Role</span>
           <select id="role-select">
@@ -71,6 +78,18 @@
   <template id="hint-list-template">
     <ul class="hint-list"></ul>
   </template>
+
+  <div id="avatar-modal" class="avatar-modal hidden" role="dialog" aria-modal="true" aria-labelledby="avatar-modal-title">
+    <div class="avatar-modal-backdrop" data-dismiss="avatar-modal"></div>
+    <div class="avatar-modal-panel" role="document">
+      <button type="button" id="avatar-modal-close" class="avatar-modal-close" aria-label="Close avatar picker" data-dismiss="avatar-modal">×</button>
+      <div class="avatar-modal-content">
+        <h3 id="avatar-modal-title">Choose your avatar</h3>
+        <p class="avatar-modal-subtitle">Pick an icon to represent you at the table.</p>
+        <div id="avatar-options" class="avatar-options" role="listbox" aria-label="Avatar options"></div>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/app.js"></script>
 </body>

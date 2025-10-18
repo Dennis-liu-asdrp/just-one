@@ -15,8 +15,21 @@ const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
 const personalStatsSection = document.getElementById('personal-stats');
 const leaderboardTabs = leaderboardPanel ? Array.from(leaderboardPanel.querySelectorAll('.leaderboard-tab')) : [];
+const avatarOptionsContainer = document.getElementById('avatar-options');
+const avatarInput = document.getElementById('avatar-input');
+const avatarPickerButton = document.getElementById('avatar-picker-button');
+const avatarPickerCurrent = document.getElementById('avatar-picker-current');
+const avatarModal = document.getElementById('avatar-modal');
+const avatarModalClose = document.getElementById('avatar-modal-close');
 
 let leaderboardView = 'room';
+
+const fallbackAvatars = [
+  '🦊','🐼','🐸','🦄','🐝','🐢','🐧','🦁','🐙','🐨',
+  '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
+  '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
+];
+const defaultAvatar = '🙂';
 
 let player = null;
 let serverState = null;
@@ -27,6 +40,9 @@ let lastKnownStage = null;
 let currentWord = null;
 let buttonFeedbackInitialized = false;
 let audioContext = null;
+let availableAvatars = [...fallbackAvatars];
+let selectedAvatar = defaultAvatar;
+let avatarModalOpen = false;
 
 init();
 
@@ -42,11 +58,174 @@ function init() {
       renderLeaderboard();
     });
   });
+  setupAvatarPicker();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
   setupButtonFeedback();
+}
+
+function setupAvatarPicker() {
+  if (!avatarOptionsContainer) return;
+  renderAvatarOptions();
+  updateAvatarPickerButton();
+
+  if (avatarPickerButton) {
+    avatarPickerButton.addEventListener('click', () => {
+      if (avatarModalOpen) {
+        closeAvatarModal();
+      } else {
+        openAvatarModal();
+      }
+    });
+  }
+
+  if (avatarModal) {
+    avatarModal.addEventListener('click', event => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.dataset.dismiss === 'avatar-modal') {
+        closeAvatarModal();
+      }
+    });
+  }
+
+  if (avatarModalClose) {
+    avatarModalClose.addEventListener('click', () => closeAvatarModal());
+  }
+}
+
+function getAvailableAvatars() {
+  return Array.isArray(availableAvatars) && availableAvatars.length ? availableAvatars : fallbackAvatars;
+}
+
+function normalizeAvatarChoice(value) {
+  const avatars = getAvailableAvatars();
+  if (value === defaultAvatar) {
+    return defaultAvatar;
+  }
+  if (typeof value === 'string' && avatars.includes(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && fallbackAvatars.includes(value)) {
+    const fallbackMatch = fallbackAvatars.find(avatar => avatars.includes(avatar));
+    if (fallbackMatch) return fallbackMatch;
+  }
+  return avatars[0] || fallbackAvatars[0] || defaultAvatar;
+}
+
+function renderAvatarOptions() {
+  if (!avatarOptionsContainer) return;
+  const avatars = getAvailableAvatars();
+  if (!avatars.length) return;
+
+  selectedAvatar = normalizeAvatarChoice(selectedAvatar);
+  avatarOptionsContainer.innerHTML = '';
+
+  avatars.forEach(avatar => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'avatar-option';
+    button.dataset.avatar = avatar;
+    button.textContent = avatar;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-label', `Select avatar ${avatar}`);
+    button.setAttribute('aria-selected', avatar === selectedAvatar ? 'true' : 'false');
+    button.addEventListener('click', () => {
+      updateSelectedAvatar(avatar);
+      closeAvatarModal();
+    });
+    avatarOptionsContainer.appendChild(button);
+  });
+
+  updateSelectedAvatar(selectedAvatar);
+}
+
+function updateSelectedAvatar(avatar) {
+  selectedAvatar = normalizeAvatarChoice(avatar);
+  if (avatarInput) {
+    avatarInput.value = selectedAvatar;
+  }
+  highlightSelectedAvatar();
+  updateAvatarPickerButton();
+}
+
+function highlightSelectedAvatar() {
+  if (!avatarOptionsContainer) return;
+  const buttons = avatarOptionsContainer.querySelectorAll('.avatar-option');
+  buttons.forEach(button => {
+    const isActive = button.dataset.avatar === selectedAvatar;
+    button.classList.toggle('selected', isActive);
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    button.tabIndex = isActive ? 0 : -1;
+  });
+}
+
+function syncAvailableAvatarsFromServer() {
+  if (!serverState) return;
+  const serverList = Array.isArray(serverState.availableAvatars) ? serverState.availableAvatars : null;
+  if (!serverList || serverList.length === 0) return;
+  if (arraysEqual(serverList, availableAvatars)) return;
+  availableAvatars = [...serverList];
+  renderAvatarOptions();
+}
+
+function updateAvatarPickerButton() {
+  if (!avatarPickerCurrent) return;
+  const label = selectedAvatar === defaultAvatar
+    ? `${defaultAvatar} Guest`
+    : `${selectedAvatar} Avatar`;
+  avatarPickerCurrent.textContent = label;
+  if (avatarPickerButton) {
+    avatarPickerButton.title = `Current avatar: ${label}`;
+  }
+}
+
+function openAvatarModal() {
+  if (!avatarModal) return;
+  renderAvatarOptions();
+  avatarModal.classList.remove('hidden');
+  avatarModal.classList.add('is-visible');
+  avatarModal.classList.remove('is-hiding');
+  avatarModalOpen = true;
+  if (avatarPickerButton) {
+    avatarPickerButton.setAttribute('aria-expanded', 'true');
+    avatarPickerButton.classList.add('is-open');
+  }
+  document.addEventListener('keydown', handleAvatarModalKeydown);
+  window.setTimeout(() => {
+    const active = avatarOptionsContainer?.querySelector('.avatar-option.selected')
+      || avatarOptionsContainer?.querySelector('.avatar-option');
+    if (active instanceof HTMLElement) {
+      active.focus();
+    }
+  }, 20);
+}
+
+function closeAvatarModal() {
+  if (!avatarModal || !avatarModalOpen) return;
+  avatarModal.classList.remove('is-visible');
+  avatarModal.classList.add('is-hiding');
+  avatarModalOpen = false;
+  if (avatarPickerButton) {
+    avatarPickerButton.setAttribute('aria-expanded', 'false');
+    avatarPickerButton.focus({ preventScroll: true });
+    avatarPickerButton.classList.remove('is-open');
+  }
+  document.removeEventListener('keydown', handleAvatarModalKeydown);
+  window.setTimeout(() => {
+    if (!avatarModalOpen) {
+      avatarModal.classList.add('hidden');
+      avatarModal.classList.remove('is-hiding');
+    }
+  }, 260);
+}
+
+function handleAvatarModalKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeAvatarModal();
+  }
 }
 
 async function restorePlayer() {
@@ -65,11 +244,13 @@ async function restorePlayer() {
 
   nameInput.value = stored.name;
   roleSelect.value = stored.role;
+  updateSelectedAvatar(normalizeAvatarChoice(stored.avatar));
 
   try {
     const { player: refreshed } = await silentlyRejoin(stored);
     player = refreshed;
     localStorage.setItem('just-one-player', JSON.stringify(refreshed));
+    updateSelectedAvatar(normalizeAvatarChoice(refreshed.avatar));
   } catch (err) {
     console.warn('Failed to restore session', err);
     localStorage.removeItem('just-one-player');
@@ -83,7 +264,8 @@ async function silentlyRejoin(existing) {
   return apiPost('/api/join', {
     playerId: existing.id,
     name: existing.name,
-    role: existing.role
+    role: existing.role,
+    avatar: normalizeAvatarChoice(existing.avatar)
   }, { silent: true });
 }
 
@@ -104,6 +286,8 @@ function openEventStream() {
 }
 
 function onStateChange() {
+  syncAvailableAvatarsFromServer();
+
   const round = serverState?.round;
   const roundId = round?.id ?? null;
   const stage = round?.stage ?? null;
@@ -115,6 +299,21 @@ function onStateChange() {
     lastKnownStage = stage;
     updateLayout();
     return;
+  }
+
+  if (player && serverState) {
+    const serverPlayerRecord = serverState.players.find(p => p.id === player.id);
+    if (serverPlayerRecord) {
+      const changed =
+        serverPlayerRecord.name !== player.name ||
+        serverPlayerRecord.role !== player.role ||
+        serverPlayerRecord.avatar !== player.avatar;
+      if (changed) {
+        player = { ...player, ...serverPlayerRecord };
+        localStorage.setItem('just-one-player', JSON.stringify(player));
+        updateSelectedAvatar(normalizeAvatarChoice(player.avatar));
+      }
+    }
   }
 
   if (!round) {
@@ -195,12 +394,14 @@ async function handleJoinSubmit(event) {
   if (player?.id) {
     payload.playerId = player.id;
   }
+  payload.avatar = selectedAvatar;
 
   try {
     const { player: joined } = await apiPost('/api/join', payload);
     player = joined;
     localStorage.setItem('just-one-player', JSON.stringify(joined));
     roleSelect.value = joined.role;
+    updateSelectedAvatar(normalizeAvatarChoice(joined.avatar));
     updateLayout();
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
@@ -243,7 +444,21 @@ function renderPlayerInfo() {
 
   const summary = document.createElement('div');
   summary.className = 'identity-summary';
-  summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
+
+  const avatarEl = document.createElement('span');
+  avatarEl.className = 'identity-avatar';
+  avatarEl.textContent = player.avatar || defaultAvatar;
+  summary.appendChild(avatarEl);
+
+  const nameEl = document.createElement('strong');
+  nameEl.textContent = player.name;
+  summary.appendChild(nameEl);
+
+  const roleEl = document.createElement('span');
+  roleEl.className = 'identity-role';
+  roleEl.textContent = player.role === 'guesser' ? 'Guesser' : 'Hint giver';
+  summary.appendChild(roleEl);
+
   playerInfo.appendChild(summary);
 
   const round = serverState?.round;
@@ -276,27 +491,55 @@ function renderPlayerInfo() {
 }
 
 function renderPlayers() {
-  if (!serverState) {
-    playersEl.innerHTML = '';
-    return;
-  }
-  const guessers = serverState.players.filter(p => p.role === 'guesser');
-  const hints = serverState.players.filter(p => p.role === 'hint');
+  playersEl.innerHTML = '';
+  if (!serverState) return;
 
-  playersEl.innerHTML = `
-    <div class="player-list">
-      <strong>Guesser:</strong>
-      ${guessers.length ? guessers.map(renderPlayerBadge).join('') : '<span class="empty">(none)</span>'}
-    </div>
-    <div class="player-list">
-      <strong>Hint givers:</strong>
-      ${hints.length ? hints.map(renderPlayerBadge).join('') : '<span class="empty">(none)</span>'}
-    </div>
-  `;
+  const groups = [
+    { label: 'Guesser', players: serverState.players.filter(p => p.role === 'guesser') },
+    { label: 'Hint givers', players: serverState.players.filter(p => p.role === 'hint') }
+  ];
+
+  for (const group of groups) {
+    const container = document.createElement('div');
+    container.className = 'player-list';
+
+    const title = document.createElement('strong');
+    title.textContent = `${group.label}:`;
+    container.appendChild(title);
+
+    if (group.players.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'empty';
+      empty.textContent = '(none)';
+      container.appendChild(empty);
+    } else {
+      group.players.forEach(record => {
+        container.appendChild(renderPlayerBadge(record));
+      });
+    }
+
+    playersEl.appendChild(container);
+  }
 }
 
 function renderPlayerBadge(playerRecord) {
-  return `<span>${escapeHtml(playerRecord.name)}</span>`;
+  const pill = document.createElement('span');
+  pill.className = 'player-pill';
+  if (player && player.id === playerRecord.id) {
+    pill.classList.add('is-self');
+  }
+
+  const avatarEl = document.createElement('span');
+  avatarEl.className = 'player-pill-avatar';
+  avatarEl.textContent = playerRecord.avatar || defaultAvatar;
+  pill.appendChild(avatarEl);
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'player-pill-name';
+  nameEl.textContent = playerRecord.name;
+  pill.appendChild(nameEl);
+
+  return pill;
 }
 
 function renderScore() {
@@ -363,10 +606,14 @@ function renderLeaderboard() {
       }
       const metrics = entry.metrics || {};
       const scoreValue = formatMetricValue(metrics.playerScore ?? entry.playerScore);
+      const avatarSymbol = escapeHtml(entry.avatar || defaultAvatar);
       li.innerHTML = `
         <div class="leaderboard-rank">#${index + 1}</div>
         <div class="leaderboard-info">
-          <div class="leaderboard-name">${escapeHtml(entry.name)}</div>
+          <div class="leaderboard-name">
+            <span class="leaderboard-avatar">${avatarSymbol}</span>
+            <span>${escapeHtml(entry.name)}</span>
+          </div>
           <div class="leaderboard-metrics">
             ${renderLeaderboardMetric('🥇', 'Clue Usefulness Score', metrics.cus)}
             ${renderLeaderboardMetric('💡', 'Hint Survival Rate', metrics.hsr)}
@@ -562,9 +809,30 @@ function renderRound() {
           li.classList.add('invalid');
         }
 
-        const text = canSeeText ? escapeHtml(hint.text) : hint.playerId === player.id ? escapeHtml(hint.text) : 'Hidden';
         const content = document.createElement('div');
-        content.innerHTML = `<div>${text}</div>`;
+        content.className = 'hint-content';
+
+        const row = document.createElement('div');
+        row.className = 'hint-row';
+
+        const avatarEl = document.createElement('span');
+        avatarEl.className = 'hint-avatar';
+        avatarEl.textContent = hint.avatar || defaultAvatar;
+        row.appendChild(avatarEl);
+
+        const textEl = document.createElement('div');
+        textEl.className = 'hint-text';
+        const ownHint = hint.playerId === player.id;
+        if (canSeeText || ownHint) {
+          textEl.textContent = hint.text || '';
+        } else {
+          textEl.textContent = 'Hidden';
+          textEl.classList.add('hint-text-obscured');
+        }
+        row.appendChild(textEl);
+
+        content.appendChild(row);
+
         if (player.role === 'hint') {
           const meta = document.createElement('div');
           meta.className = 'meta';
@@ -633,14 +901,55 @@ function renderRound() {
   if (round.stage === 'round_result') {
     const summary = document.createElement('div');
     summary.className = 'round-summary';
-    const guessText = round.guess?.text ?? '(no guess)';
-    const outcome = round.guess?.correct ? 'Correct!' : 'Missed';
-    const word = round.word ?? currentWord ?? 'Unknown';
-    summary.innerHTML = `
-      <h3>Round summary</h3>
-      <p>Word: <strong>${escapeHtml(word)}</strong></p>
-      <p>Guess: <strong>${escapeHtml(guessText)}</strong> — ${outcome}</p>
-    `;
+
+    const heading = document.createElement('h3');
+    heading.textContent = 'Round summary';
+    summary.appendChild(heading);
+
+    const wordLine = document.createElement('p');
+    wordLine.className = 'round-word';
+    const wordLabel = document.createElement('span');
+    wordLabel.textContent = 'Word:';
+    wordLine.appendChild(wordLabel);
+    const wordValue = document.createElement('strong');
+    wordValue.textContent = round.word ?? currentWord ?? 'Unknown';
+    wordLine.appendChild(wordValue);
+    summary.appendChild(wordLine);
+
+    const guessLine = document.createElement('p');
+    guessLine.className = 'guess-line';
+    const guessLabel = document.createElement('span');
+    guessLabel.textContent = 'Guess:';
+    guessLine.appendChild(guessLabel);
+
+    if (round.guess) {
+      const avatarEl = document.createElement('span');
+      avatarEl.className = 'guess-avatar';
+      avatarEl.textContent = round.guess.avatar || defaultAvatar;
+      guessLine.appendChild(avatarEl);
+
+      const nameEl = document.createElement('strong');
+      nameEl.className = 'guess-name';
+      nameEl.textContent = round.guess.playerName || 'Unknown player';
+      guessLine.appendChild(nameEl);
+
+      const guessTextEl = document.createElement('span');
+      guessTextEl.className = 'guess-text';
+      guessTextEl.textContent = `— ${round.guess.text || '(no guess)'}`;
+      guessLine.appendChild(guessTextEl);
+
+      const outcomeEl = document.createElement('span');
+      outcomeEl.className = `guess-outcome ${round.guess.correct ? 'success' : 'fail'}`;
+      outcomeEl.textContent = round.guess.correct ? 'Correct!' : 'Missed';
+      guessLine.appendChild(outcomeEl);
+    } else {
+      const noGuess = document.createElement('span');
+      noGuess.className = 'guess-text';
+      noGuess.textContent = '(no guess)';
+      guessLine.appendChild(noGuess);
+    }
+
+    summary.appendChild(guessLine);
     roundEl.appendChild(summary);
   }
 }
@@ -877,6 +1186,16 @@ function playClickSound() {
 function isMotionReduced() {
   if (typeof window === 'undefined' || !window.matchMedia) return false;
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function arraysEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 function escapeHtml(value) {
