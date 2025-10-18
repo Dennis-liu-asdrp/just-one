@@ -819,6 +819,22 @@ button.pulse {
   color: var(--text-muted);
 }
 
+.settings-warning {
+  margin: -2px 0 0;
+  font-size: 0.82rem;
+  color: #fca5a5;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  min-height: 1.1em;
+}
+
+.settings-warning.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .settings-option {
   display: flex;
   align-items: center;

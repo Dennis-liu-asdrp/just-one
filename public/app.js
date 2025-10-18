@@ -16,6 +16,7 @@ const settingsModalClose = document.getElementById('settings-modal-close');
 const settingsForm = document.getElementById('settings-form');
 const difficultyInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-difficulty"]')) : [];
 const roleInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-role"]')) : [];
+const roleWarningEl = document.getElementById('role-warning');
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -36,6 +37,8 @@ let audioContext = null;
 let settingsModalOpen = false;
 let shouldAutoOpenSettings = false;
 let currentSettings = { difficulty: 'easy' };
+let roleWarningTimeout = null;
+let roleWarningClearTimeout = null;
 
 init();
 
@@ -217,6 +220,7 @@ async function handleJoinSubmit(event) {
     roleSelect.value = joined.role;
     shouldAutoOpenSettings = true;
     updateLayout();
+    openSettingsModal({ auto: true });
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
     // error already surfaced by apiPost
@@ -824,6 +828,10 @@ function setupSettings() {
 
   roleInputs.forEach(input => {
     input.addEventListener('change', handleRoleChange);
+    const label = input.closest('label');
+    if (label) {
+      label.addEventListener('click', event => handleRoleOptionClick(event, input));
+    }
   });
 }
 
@@ -867,6 +875,7 @@ function closeSettingsModal(force = false) {
       }
     }, 220);
   }
+  hideRoleWarning();
   document.removeEventListener('keydown', handleSettingsKeydown);
 }
 
@@ -929,10 +938,62 @@ async function handleRoleChange(event) {
     localStorage.setItem('just-one-player', JSON.stringify(updated));
     showMessage(value === 'guesser' ? 'You are now the guesser.' : 'You are now a hint giver.');
   } catch (err) {
-    // message surfaced by apiPost
+    if (typeof err?.message === 'string' && err.message.toLowerCase().includes('guesser')) {
+      showRoleLimitWarning();
+    }
   } finally {
     applySettingsFormState();
   }
+}
+
+function handleRoleOptionClick(event, input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  if (!input.disabled) return;
+  if (!player) return;
+  if (input.value !== 'guesser') return;
+  const roundStage = serverState?.round?.stage ?? null;
+  const roundActive = Boolean(serverState?.round && roundStage !== 'round_result');
+  if (roundActive) return;
+  const guesserTaken = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player.id));
+  if (!guesserTaken) return;
+  event.preventDefault();
+  showRoleLimitWarning();
+}
+
+function showRoleLimitWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.textContent = 'There can be a maximum of one guesser at any time.';
+  roleWarningEl.classList.add('is-visible');
+  roleWarningTimeout = window.setTimeout(() => {
+    roleWarningEl.classList.remove('is-visible');
+    roleWarningTimeout = null;
+    roleWarningClearTimeout = window.setTimeout(() => {
+      roleWarningEl.textContent = '';
+      roleWarningClearTimeout = null;
+    }, 220);
+  }, 2400);
+}
+
+function hideRoleWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.classList.remove('is-visible');
+  roleWarningEl.textContent = '';
 }
 
 function applySettingsFormState() {
@@ -953,6 +1014,9 @@ function applySettingsFormState() {
     const disableBecauseTaken = isGuesser && otherGuesserExists && currentRole !== 'guesser';
     input.disabled = disableBecauseRound || disableBecauseNoPlayer || disableBecauseTaken;
   });
+  if (!player || roundActive || currentRole === 'guesser' || !otherGuesserExists) {
+    hideRoleWarning();
+  }
 }
 
 function syncSettingsFromServer() {
