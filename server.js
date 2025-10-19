@@ -3,23 +3,11 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
+import words from './words.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, 'public');
-
-const words = [
-  'Apple','Bridge','Candle','Dragon','Elephant','Forest','Galaxy','Harmony','Island','Jungle',
-  'Knight','Lantern','Mountain','Nebula','Ocean','Pyramid','Quartz','Rainbow','Saturn','Treasure',
-  'Umbrella','Violin','Whisper','Xylophone','Yacht','Zephyr','Anchor','Beacon','Compass','Diamond',
-  'Emerald','Feather','Glacier','Harbor','Igloo','Jewel','Lagoon','Meteor','Nectar','Oracle',
-  'Palette','Quiver','Riddle','Starlight','Temple','Universe','Voyage','Waterfall','Yonder','Zodiac',
-  'Alpaca','Blizzard','Cactus','Dolphin','Enigma','Fjord','Geyser','Harpoon','Inferno','Jigsaw',
-  'Kernel','Labyrinth','Meadow','Nimbus','Obsidian','Paradox','Quasar','Runway','Saffron','Tornado',
-  'Utopia','Vortex','Wavelength','Yodel','Zucchini','Atlas','Bonsai','Chimera','Dynamo','Epoch',
-  'Fable','Glimmer','Harlem','Inkling','Juggler','Keepsake','Lighthouse','Monsoon','Nomad','Overture',
-  'Pinnacle','Quest','Reverie','Serenade','Timber','Udon','Verdict','Wingman','Yearbook','Zenith'
-];
 
 const MAX_TOTAL_ROUNDS = 20;
 const DEFAULT_TOTAL_ROUNDS = 10;
