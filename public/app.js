@@ -221,12 +221,16 @@ function updateLayout() {
 
 function renderSharePanel() {
   if (!sharePanel) return;
+  const inviteButton = document.getElementById('invite-btn');
+
   if (!player) {
     sharePanel.classList.add('hidden');
+    if (inviteButton) {
+      inviteButton.disabled = true;
+    }
     return;
   }
 
-  sharePanel.classList.remove('hidden');
   const origin = window.location.origin;
   shareLinkInput.value = origin;
 
@@ -235,22 +239,36 @@ function renderSharePanel() {
   } else {
     shareHint.textContent = 'Share this address with friends so they can join the same table.';
   }
+
+  sharePanel.classList.remove('hidden');
+  if (inviteButton) {
+    inviteButton.disabled = false;
+    if (!inviteButton.dataset.boundCopy) {
+      inviteButton.addEventListener('click', handleCopyShareLink);
+      inviteButton.dataset.boundCopy = 'true';
+    }
+  }
 }
 
 function renderPlayerInfo() {
   playerInfo.innerHTML = '';
 
   if (!player) {
-    playerInfo.textContent = 'Enter a name and choose a role to join the table.';
+    const intro = document.createElement('div');
+    intro.className = 'player-info-empty';
+    intro.textContent = 'Enter a name and choose a role to join the table.';
+    playerInfo.appendChild(intro);
     return;
   }
 
   const summary = document.createElement('div');
+  summary.className = 'player-summary';
   summary.innerHTML = `<strong>${escapeHtml(player.name)}</strong> — ${player.role === 'guesser' ? 'Guesser' : 'Hint giver'}`;
   playerInfo.appendChild(summary);
 
   if (!serverState?.round) {
     const prompt = document.createElement('div');
+    prompt.className = 'player-prompt';
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
   }
@@ -277,35 +295,53 @@ function renderPlayerInfo() {
   `;
   form.addEventListener('submit', handleIdentitySubmit);
   playerInfo.appendChild(form);
-
-  const actions = document.createElement('div');
-  actions.className = 'player-actions';
-  const leaveButton = document.createElement('button');
-  leaveButton.type = 'button';
-  leaveButton.textContent = 'Leave table';
-  leaveButton.addEventListener('click', handleLeaveTable);
-  actions.appendChild(leaveButton);
-  playerInfo.appendChild(actions);
 }
 
 function renderPlayers() {
-  if (!serverState) {
-    playersEl.innerHTML = '';
-    return;
-  }
-  const guessers = serverState.players.filter(p => p.role === 'guesser');
-  const hints = serverState.players.filter(p => p.role === 'hint');
+  if (!playersEl) return;
 
   playersEl.innerHTML = `
-    <div class="player-list">
-      <strong>Guesser:</strong>
-      ${guessers.length ? guessers.map(renderPlayerBadge).join('') : '<span class="empty">(none)</span>'}
-    </div>
-    <div class="player-list">
-      <strong>Hint givers:</strong>
-      ${hints.length ? hints.map(renderPlayerBadge).join('') : '<span class="empty">(none)</span>'}
-    </div>
+    <div class="players-title">Hint Givers</div>
+    <div id="players-hintgivers" class="pill-grid"></div>
+    <div class="guesser-line">Guesser: <span id="players-guesser" class="pill"></span></div>
   `;
+
+  const hintContainer = document.getElementById('players-hintgivers');
+  const guesserPill = document.getElementById('players-guesser');
+
+  if (!serverState || !hintContainer || !guesserPill) {
+    if (guesserPill) {
+      guesserPill.classList.add('empty');
+      guesserPill.textContent = '(none)';
+    }
+    return;
+  }
+
+  hintContainer.innerHTML = '';
+  const hints = serverState.players.filter(p => p.role === 'hint');
+  const guessers = serverState.players.filter(p => p.role === 'guesser');
+
+  if (hints.length) {
+    hints.forEach(playerRecord => {
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.textContent = playerRecord.name;
+      hintContainer.appendChild(pill);
+    });
+  } else {
+    const empty = document.createElement('span');
+    empty.className = 'pill empty';
+    empty.textContent = '(none)';
+    hintContainer.appendChild(empty);
+  }
+
+  const guesser = guessers[0];
+  guesserPill.textContent = guesser ? guesser.name : '(none)';
+  if (!guesser) {
+    guesserPill.classList.add('empty');
+  } else {
+    guesserPill.classList.remove('empty');
+  }
 }
 
 function renderPlayerBadge(playerRecord) {
@@ -313,27 +349,83 @@ function renderPlayerBadge(playerRecord) {
 }
 
 function renderScore() {
+  const stageLine = document.getElementById('stage-indicator');
+  const scoreLine = document.getElementById('scoreboard');
+
+  if (!stageLine || !scoreLine) return;
+
   if (!serverState) {
-    stageIndicator.textContent = '';
-    scoreboardEl.textContent = '';
+    stageLine.textContent = '';
+    scoreLine.textContent = '';
     return;
   }
-  const stage = serverState.round?.stage ?? 'waiting';
-  stageIndicator.textContent = formatStage(stage);
+
+  const round = serverState.round;
+  let message = 'Waiting to start';
+
+  if (round) {
+    switch (round.stage) {
+      case 'collecting_hints':
+        message = 'Hints are being prepared.';
+        break;
+      case 'reviewing_hints':
+        message = 'Collisions are being reviewed.';
+        break;
+      case 'awaiting_guess':
+        message = player?.role === 'guesser' ? 'Make your guess!' : 'Guesser is guessing';
+        break;
+      case 'round_result':
+        message = 'Round complete.';
+        break;
+      default:
+        message = 'Waiting to start';
+    }
+  }
+
+  stageLine.textContent = message;
   const { success, failure } = serverState.score;
-  scoreboardEl.textContent = `Score: ${success} correct · ${failure} misses`;
+  scoreLine.textContent = `Score: ${success} correct · ${failure} misses`;
 }
 
 function renderControls() {
   controlsEl.innerHTML = '';
-  if (!player || !serverState) return;
+  const inlineControls = document.getElementById('controls-inline');
+  const leaveButton = document.getElementById('leave-btn');
+  const endButton = document.getElementById('end-btn');
+
+  if (inlineControls) {
+    inlineControls.innerHTML = '';
+  }
+
+  if (leaveButton) {
+    const hasPlayer = Boolean(player);
+    leaveButton.disabled = !hasPlayer;
+    leaveButton.classList.toggle('hidden', !hasPlayer);
+    if (player && !leaveButton.dataset.boundLeave) {
+      leaveButton.addEventListener('click', handleLeaveTable);
+      leaveButton.dataset.boundLeave = 'true';
+    }
+  }
+
+  if (endButton) {
+    endButton.disabled = true;
+    endButton.classList.toggle('hidden', !player);
+  }
+
+  if (!player || !serverState || !inlineControls) {
+    return;
+  }
+
+  const addInlineButton = (label, handler, disabled = false) => {
+    const btn = buildButton(label, handler, disabled);
+    btn.classList.add('btn', 'btn-primary');
+    inlineControls.appendChild(btn);
+  };
 
   const round = serverState.round;
   if (!round) {
     if (player.role === 'hint') {
-      controlsEl.appendChild(buildButton('Start new round', () => startRound()));
-    } else {
-      controlsEl.textContent = 'Waiting for a hint giver to start the first round.';
+      addInlineButton('Start new round', () => startRound());
     }
     return;
   }
@@ -341,131 +433,90 @@ function renderControls() {
   switch (round.stage) {
     case 'collecting_hints':
       if (player.role === 'hint') {
-        controlsEl.appendChild(buildButton('Review collisions', () => beginReview(), round.hints.length === 0));
-      } else {
-        controlsEl.textContent = 'Hints are being prepared.';
+        addInlineButton('Review collisions', () => beginReview(), round.hints.length === 0);
       }
       break;
     case 'reviewing_hints':
       if (player.role === 'hint') {
-        controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
-      } else {
-        controlsEl.textContent = 'Hint givers are resolving collisions.';
-      }
-      break;
-    case 'awaiting_guess':
-      if (player.role === 'guesser') {
-        const form = document.createElement('form');
-        form.className = 'guess-form';
-        form.innerHTML = `
-          <label>
-            <span>Your guess</span>
-            <input type="text" name="guess" autocomplete="off" required />
-          </label>
-          <button type="submit">Submit guess</button>
-        `;
-        form.addEventListener('submit', async evt => {
-          evt.preventDefault();
-          const formData = new FormData(form);
-          const guess = (formData.get('guess') || '').toString().trim();
-          if (!guess) {
-            showMessage('Enter a guess first.', 'error');
-            return;
-          }
-          await submitGuess(guess);
-          form.reset();
-        });
-        controlsEl.appendChild(form);
-      } else {
-        controlsEl.textContent = 'Waiting for the guesser to decide.';
+        addInlineButton('Reveal valid clues to guesser', () => revealClues());
       }
       break;
     case 'round_result':
       if (player.role === 'hint') {
-        controlsEl.appendChild(buildButton('Start next round', () => startRound()));
-      } else {
-        controlsEl.textContent = 'Review the result and ask for another round!';
+        addInlineButton('Start next round', () => startRound());
       }
       break;
     default:
-      controlsEl.textContent = '';
+      break;
   }
 }
 
 function renderRound() {
   roundEl.innerHTML = '';
-  if (!player || !serverState) return;
 
-  const round = serverState.round;
-  if (!round) {
-    roundEl.innerHTML = '<p>No round in progress yet.</p>';
+  if (!player || !serverState) {
+    roundEl.appendChild(buildBigCard());
     return;
   }
 
-  if (player.role === 'hint' && currentWord) {
-    const card = document.createElement('div');
-    card.className = 'word-card';
-    card.textContent = currentWord;
-    roundEl.appendChild(card);
+  const round = serverState.round;
+  if (!round) {
+    roundEl.appendChild(buildBigCard('Waiting for the next round.'));
+    return;
   }
 
-  if (round.hints.length > 0) {
-    const list = document.createElement('ul');
-    list.className = 'hint-list';
+  const stage = round.stage;
 
-    const showTexts = round.stage !== 'collecting_hints' || player.role === 'hint';
-    const hintsForDisplay = round.stage === 'awaiting_guess' ? round.hints.filter(h => !h.invalid) : round.hints;
-
-    hintsForDisplay.forEach(hint => {
-      const li = document.createElement('li');
-      li.className = 'hint-item';
-      if (hint.invalid) {
-        li.classList.add('invalid');
-      }
-
-      const text = showTexts ? escapeHtml(hint.text) : hint.playerId === player.id ? escapeHtml(hint.text) : 'Submitted';
-      const content = document.createElement('div');
-      content.innerHTML = `<div>${text}</div>`;
-      if (player.role === 'hint') {
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = hint.author;
-        content.appendChild(meta);
-      }
-
-      li.appendChild(content);
-
-      if (player.role === 'hint' && round.stage === 'reviewing_hints') {
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.textContent = hint.invalid ? 'Restore' : 'Eliminate';
-        toggle.addEventListener('click', () => toggleHint(hint));
-        li.appendChild(toggle);
-      }
-
-      if (round.stage === 'awaiting_guess' && player.role === 'guesser') {
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = 'Valid clue';
-        li.appendChild(meta);
-      }
-
-      list.appendChild(li);
-    });
-
-    roundEl.appendChild(list);
+  if (stage === 'collecting_hints') {
+    if (player.role === 'hint') {
+      renderCollectingForHint(round);
+    } else {
+      roundEl.appendChild(buildBigCard('Hints are being prepared.'));
+    }
+    return;
   }
 
-  if (round.stage === 'collecting_hints' && player.role === 'hint') {
+  if (stage === 'reviewing_hints') {
+    if (player.role === 'hint') {
+      renderReviewForHint(round);
+    } else {
+      roundEl.appendChild(buildBigCard('Collisions are being reviewed.'));
+    }
+    return;
+  }
+
+  if (stage === 'awaiting_guess') {
+    renderAwaitingGuess(round);
+    return;
+  }
+
+  if (stage === 'round_result') {
+    renderRoundResult(round);
+    return;
+  }
+
+  roundEl.appendChild(buildBigCard());
+
+  function renderCollectingForHint(activeRound) {
+    const layout = document.createElement('div');
+    layout.className = 'round-stack';
+
+    if (currentWord) {
+      const card = document.createElement('div');
+      card.className = 'word-card';
+      card.textContent = currentWord;
+      layout.appendChild(card);
+    }
+
     const form = document.createElement('form');
     form.className = 'clue-form';
-    const existing = round.hints.find(h => h.playerId === player.id);
+    const existing = activeRound.hints.find(h => h.playerId === player.id);
     form.innerHTML = `
       <label>
         <span>Your clue</span>
         <textarea name="clue" maxlength="32" placeholder="Single word"></textarea>
       </label>
-      <button type="submit">Submit clue</button>
+      <button type="submit" class="btn btn-primary">Submit clue</button>
     `;
     const textarea = form.querySelector('textarea');
     if (existing) {
@@ -480,21 +531,194 @@ function renderRound() {
       }
       await submitHint(value);
     });
-    roundEl.appendChild(form);
+
+    layout.appendChild(form);
+
+    const note = document.createElement('div');
+    note.className = 'hint-note';
+    note.textContent = 'Hints are being prepared.';
+    layout.appendChild(note);
+
+    if (activeRound.hints.length > 0) {
+      const list = document.createElement('div');
+      list.className = 'hint-column';
+      activeRound.hints.forEach(hint => {
+        const pill = document.createElement('div');
+        pill.className = 'hint-pill';
+        const text = hint.playerId === player.id ? escapeHtml(hint.text) : 'Submitted';
+        pill.innerHTML = `<span>${text}</span><span class="hint-author">${escapeHtml(hint.author)}</span>`;
+        list.appendChild(pill);
+      });
+      layout.appendChild(list);
+    }
+
+    roundEl.appendChild(layout);
+    roundEl.appendChild(buildBigCard());
   }
 
-  if (round.stage === 'round_result') {
+  function renderReviewForHint(activeRound) {
+    const stack = document.createElement('div');
+    stack.className = 'hint-column';
+
+    if (!activeRound.hints.length) {
+      const empty = document.createElement('div');
+      empty.className = 'hint-pill empty';
+      empty.textContent = '(no hints yet)';
+      stack.appendChild(empty);
+    }
+
+    activeRound.hints.forEach(hint => {
+      const pill = document.createElement('div');
+      pill.className = 'hint-pill';
+      if (hint.invalid) {
+        pill.classList.add('invalid');
+      }
+      const label = document.createElement('span');
+      label.textContent = `${hint.author}'s guess: ${hint.text}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = hint.invalid ? 'Restore' : '×';
+      remove.addEventListener('click', () => toggleHint(hint));
+      pill.appendChild(label);
+      pill.appendChild(remove);
+      stack.appendChild(pill);
+    });
+
+    roundEl.appendChild(stack);
+
+    const approve = document.createElement('button');
+    approve.type = 'button';
+    approve.className = 'btn btn-primary btn-block';
+    approve.textContent = 'Approve Collisions';
+    approve.addEventListener('click', () => revealClues());
+    roundEl.appendChild(approve);
+  }
+
+  function renderAwaitingGuess(activeRound) {
+    const validHints = activeRound.hints.filter(h => !h.invalid);
+    const columns = document.createElement('div');
+    columns.className = 'round-columns';
+
+    const othersColumn = document.createElement('div');
+    othersColumn.className = 'hint-column';
+    const mineColumn = document.createElement('div');
+    mineColumn.className = 'hint-column';
+
+    const othersTitle = document.createElement('div');
+    othersTitle.className = 'column-title';
+    othersTitle.textContent = 'Other hints';
+    const mineTitle = document.createElement('div');
+    mineTitle.className = 'column-title';
+    mineTitle.textContent = player?.role === 'guesser' ? 'My guess' : 'My hint';
+
+    othersColumn.appendChild(othersTitle);
+    mineColumn.appendChild(mineTitle);
+
+    validHints.forEach(hint => {
+      const pill = document.createElement('div');
+      pill.className = 'hint-pill';
+      pill.textContent = hint.text;
+      if (hint.playerId === player?.id && player.role === 'hint') {
+        mineColumn.appendChild(pill);
+      } else {
+        othersColumn.appendChild(pill);
+      }
+    });
+
+    if (player.role !== 'hint') {
+      const guessText = activeRound.guess?.text;
+      if (guessText) {
+        const guessPill = document.createElement('div');
+        guessPill.className = 'hint-pill';
+        guessPill.textContent = guessText;
+        mineColumn.appendChild(guessPill);
+      }
+    }
+
+    if (othersColumn.children.length === 1) {
+      const empty = document.createElement('div');
+      empty.className = 'hint-pill empty';
+      empty.textContent = '(none yet)';
+      othersColumn.appendChild(empty);
+    }
+
+    if (mineColumn.children.length === 1) {
+      const empty = document.createElement('div');
+      empty.className = 'hint-pill empty';
+      empty.textContent = '(none yet)';
+      mineColumn.appendChild(empty);
+    }
+
+    columns.appendChild(othersColumn);
+    columns.appendChild(mineColumn);
+    roundEl.appendChild(columns);
+
+    if (player.role === 'guesser') {
+      const guessArea = document.createElement('div');
+      guessArea.className = 'guess-area';
+      const callout = document.createElement('div');
+      callout.textContent = 'Make your guess!';
+      guessArea.appendChild(callout);
+
+      const form = document.createElement('form');
+      form.innerHTML = `
+        <input type="text" name="guess" placeholder="Your guess" autocomplete="off" required />
+        <button type="submit" class="btn btn-primary">Submit guess</button>
+      `;
+      form.addEventListener('submit', async evt => {
+        evt.preventDefault();
+        const formData = new FormData(form);
+        const guess = (formData.get('guess') || '').toString().trim();
+        if (!guess) {
+          showMessage('Enter a guess first.', 'error');
+          return;
+        }
+        await submitGuess(guess);
+        form.reset();
+      });
+
+      guessArea.appendChild(form);
+      roundEl.appendChild(guessArea);
+    }
+  }
+
+  function renderRoundResult(activeRound) {
     const summary = document.createElement('div');
     summary.className = 'round-summary';
-    const guessText = round.guess?.text ?? '(no guess)';
-    const outcome = round.guess?.correct ? 'Correct!' : 'Missed';
-    const word = round.word ?? currentWord ?? 'Unknown';
+    const guessText = activeRound.guess?.text ?? '(no guess)';
+    const outcome = activeRound.guess?.correct ? 'Correct!' : 'Missed';
+    const word = activeRound.word ?? currentWord ?? 'Unknown';
     summary.innerHTML = `
       <h3>Round summary</h3>
       <p>Word: <strong>${escapeHtml(word)}</strong></p>
       <p>Guess: <strong>${escapeHtml(guessText)}</strong> — ${outcome}</p>
     `;
     roundEl.appendChild(summary);
+
+    const validHints = activeRound.hints.filter(h => !h.invalid);
+    if (validHints.length) {
+      const list = document.createElement('div');
+      list.className = 'hint-column';
+      validHints.forEach(hint => {
+        const pill = document.createElement('div');
+        pill.className = 'hint-pill';
+        pill.textContent = `${hint.author}: ${hint.text}`;
+        list.appendChild(pill);
+      });
+      roundEl.appendChild(list);
+    }
+
+    roundEl.appendChild(buildBigCard());
+  }
+
+  function buildBigCard(text) {
+    const card = document.createElement('div');
+    card.className = 'big-card';
+    if (text) {
+      card.classList.add('big-card-center');
+      card.textContent = text;
+    }
+    return card;
   }
 }
 
