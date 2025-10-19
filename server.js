@@ -678,34 +678,6 @@ async function handleGetWord(req, res, params) {
   }
 }
 
-function getRoundReviewLockSet(createIfMissing = true) {
-  if (!state.round) return new Set();
-  const current = state.round.reviewLocks;
-  if (current instanceof Set) {
-    return current;
-  }
-  if (Array.isArray(current)) {
-    const set = new Set(current);
-    if (createIfMissing) {
-      state.round.reviewLocks = set;
-    }
-    return set;
-  }
-  if (!current) {
-    if (createIfMissing) {
-      const set = new Set();
-      state.round.reviewLocks = set;
-      return set;
-    }
-    return new Set();
-  }
-  const set = new Set(Array.from(current));
-  if (createIfMissing) {
-    state.round.reviewLocks = set;
-  }
-  return set;
-}
-
 function allHintGiversLocked() {
   if (!state.round) return false;
   const locks = getRoundReviewLockSet(false);
