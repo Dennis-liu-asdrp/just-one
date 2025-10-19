@@ -1174,8 +1174,8 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
-  }
-    else if (player.role === 'guesser' && stage !== 'round_result') {
+    }
+  } else if (player.role === 'guesser' && stage !== 'round_result') {
     const placeholder = document.createElement('div');
     placeholder.className = 'info-card subtle';
     placeholder.textContent = stage === 'reviewing_hints'
