@@ -13,6 +13,11 @@
   <main>
     <h1>Just One</h1>
 
+    <button type="button" id="instructions-button" class="instructions-button" aria-haspopup="dialog" aria-expanded="false">
+      <span class="instructions-icon" aria-hidden="true">?</span>
+      <span class="sr-only">How to play</span>
+    </button>
+
     <section id="join-section" class="panel">
       <h2>Join the table</h2>
       <form id="join-form">
@@ -20,6 +25,7 @@
           <span>Name</span>
           <input id="name-input" type="text" required maxlength="24" autocomplete="off" />
         </label>
+
         <div id="avatar-field" class="avatar-field">
           <span class="avatar-field-label">Avatar</span>
           <button type="button" id="avatar-picker-button" class="avatar-picker-button" aria-haspopup="dialog" aria-expanded="false">
@@ -27,6 +33,7 @@
           </button>
           <input id="avatar-input" type="hidden" name="avatar" />
         </div>
+
         <label>
           <span>Role</span>
           <select id="role-select">
@@ -35,6 +42,7 @@
             <option value="hint">Hint giver</option>
           </select>
         </label>
+
         <button type="submit">Join</button>
       </form>
       <p class="hint">There can be only one guesser at a time.</p>
@@ -56,17 +64,26 @@
         </aside>
 
         <div id="game-main" class="game-main">
+          <button type="button" id="settings-button" class="settings-button" aria-haspopup="dialog" aria-expanded="false">
+            <span class="settings-icon" aria-hidden="true">⚙️</span>
+            <span class="sr-only">Game settings</span>
+          </button>
+
           <div id="player-info"></div>
 
           <div class="status-bar">
             <div id="stage-indicator"></div>
             <div id="scoreboard"></div>
+            <div class="round-tracker">
+              <div id="round-progress"></div>
+              <button type="button" id="end-game-button">End game early</button>
+              <div id="end-game-status" class="end-game-status"></div>
+              <button type="button" id="reset-game-button" class="reset-game-button hidden">Start new game</button>
+            </div>
           </div>
 
           <section id="players"></section>
-
           <section id="controls"></section>
-
           <section id="round"></section>
         </div>
       </div>
@@ -75,10 +92,64 @@
     <div id="messages"></div>
   </main>
 
+  <!-- Template for hint lists -->
   <template id="hint-list-template">
     <ul class="hint-list"></ul>
   </template>
 
+  <!-- Settings modal -->
+  <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="settings-modal-backdrop" data-dismiss="settings-modal"></div>
+    <div class="settings-modal-panel" role="document">
+      <button type="button" id="settings-modal-close" class="settings-modal-close" aria-label="Close settings" data-dismiss="settings-modal">×</button>
+
+      <form id="settings-form" class="settings-form">
+        <h3 id="settings-modal-title">Game settings</h3>
+        <p class="settings-subtitle">Adjust the table before the next round begins.</p>
+
+        <fieldset class="settings-fieldset">
+          <legend>Game length</legend>
+          <label for="settings-total-rounds">
+            <span>Total rounds per game</span>
+            <input type="number" id="settings-total-rounds" name="totalRounds" min="1" max="20" step="1" required />
+          </label>
+          <p class="settings-hint">Choose between 1 and 20 rounds. Settings apply once saved and the next round starts.</p>
+        </fieldset>
+
+        <fieldset class="settings-fieldset">
+          <legend>Difficulty</legend>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="easy" checked />
+            <span>Easy mode</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="hard" />
+            <span>Hard mode</span>
+          </label>
+        </fieldset>
+
+        <p class="settings-description">Hard mode blocks proper nouns and multi-word hints.</p>
+
+        <fieldset class="settings-fieldset">
+          <legend>Change role</legend>
+          <p class="settings-note">Switch roles between rounds. Only one guesser can be active.</p>
+          <p id="role-warning" class="settings-warning" aria-live="polite"></p>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="guesser" />
+            <span>Be the guesser</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="hint" checked />
+            <span>Give hints</span>
+          </label>
+        </fieldset>
+
+        <button type="submit" class="settings-save">Save settings</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Avatar picker modal -->
   <div id="avatar-modal" class="avatar-modal hidden" role="dialog" aria-modal="true" aria-labelledby="avatar-modal-title">
     <div class="avatar-modal-backdrop" data-dismiss="avatar-modal"></div>
     <div class="avatar-modal-panel" role="document">
@@ -87,6 +158,26 @@
         <h3 id="avatar-modal-title">Choose your avatar</h3>
         <p class="avatar-modal-subtitle">Pick an icon to represent you at the table.</p>
         <div id="avatar-options" class="avatar-options" role="listbox" aria-label="Avatar options"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="instructions-modal" class="info-modal hidden" role="dialog" aria-modal="true" aria-labelledby="instructions-modal-title">
+    <div class="info-modal-backdrop" data-dismiss="instructions-modal"></div>
+    <div class="info-modal-panel" role="document">
+      <button type="button" id="instructions-modal-close" class="info-modal-close" aria-label="Close instructions" data-dismiss="instructions-modal">×</button>
+      <div class="info-modal-body">
+        <h3 id="instructions-modal-title">How to play Just One</h3>
+        <p class="info-modal-lead">Team up to help the guesser find the secret word using unique clues.</p>
+        <ol class="info-modal-list">
+          <li><strong>Join the table.</strong> Choose a name, select <em>Guesser</em> or <em>Hint giver</em>, then tap <em>Join</em>.</li>
+          <li><strong>Start a round.</strong> A hint giver starts once the room has at least one guesser and one hint giver.</li>
+          <li><strong>Write one clue.</strong> Hint givers see the word and submit a single-word clue. Proper nouns or multi-word clues are blocked in hard mode.</li>
+          <li><strong>Remove duplicates.</strong> Hint givers compare their clues and eliminate any duplicates or collisions before revealing them. A collision happens when one clue <strong>is a</strong> direct description of another (for example, if the clue is "actor", then "person" is not allowed because an actor <strong>is a</strong> person; "Ryan Reynolds" is not allowed because he <strong>is a</strong> actor). Hint givers talk it out and remove similar or related words before the clues are shown.</li>
+          <li><strong>Make the guess.</strong> The guesser sees the remaining clues and submits an answer. Everyone wins or loses together.</li>
+          <li><strong>Keep playing.</strong> Start the next round right away or adjust settings between rounds for a new challenge.</li>
+        </ol>
+        <p class="info-modal-footer">Need a refresher later? Click the question mark icon any time.</p>
       </div>
     </div>
   </div>

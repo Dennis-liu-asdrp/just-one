@@ -10,6 +10,18 @@ const playersEl = document.getElementById('players');
 const controlsEl = document.getElementById('controls');
 const roundEl = document.getElementById('round');
 const messagesEl = document.getElementById('messages');
+const roundProgressEl = document.getElementById('round-progress');
+const endGameButton = document.getElementById('end-game-button');
+const endGameStatus = document.getElementById('end-game-status');
+const resetGameButton = document.getElementById('reset-game-button');
+const settingsButton = document.getElementById('settings-button');
+const settingsModal = document.getElementById('settings-modal');
+const settingsModalClose = document.getElementById('settings-modal-close');
+const settingsForm = document.getElementById('settings-form');
+const settingsTotalRoundsInput = document.getElementById('settings-total-rounds');
+const difficultyInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-difficulty"]')) : [];
+const roleInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-role"]')) : [];
+const roleWarningEl = document.getElementById('role-warning');
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -21,6 +33,9 @@ const avatarPickerButton = document.getElementById('avatar-picker-button');
 const avatarPickerCurrent = document.getElementById('avatar-picker-current');
 const avatarModal = document.getElementById('avatar-modal');
 const avatarModalClose = document.getElementById('avatar-modal-close');
+const instructionsButton = document.getElementById('instructions-button');
+const instructionsModal = document.getElementById('instructions-modal');
+const instructionsModalClose = document.getElementById('instructions-modal-close');
 
 let leaderboardView = 'room';
 
@@ -30,6 +45,7 @@ const fallbackAvatars = [
   '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
 ];
 const defaultAvatar = '🙂';
+const INSTRUCTIONS_STORAGE_KEY = 'just-one-instructions-seen';
 
 let player = null;
 let serverState = null;
@@ -40,9 +56,20 @@ let lastKnownStage = null;
 let currentWord = null;
 let buttonFeedbackInitialized = false;
 let audioContext = null;
+let settingsModalOpen = false;
+let shouldAutoOpenSettings = false;
+let roleWarningTimeout = null;
+let roleWarningClearTimeout = null;
+let currentSettings = {
+  totalRounds: 10,
+  maxRounds: 20,
+  difficulty: 'easy'
+};
 let availableAvatars = [...fallbackAvatars];
 let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
+let instructionsModalOpen = false;
+let shouldAutoOpenInstructions = !hasSeenInstructionsBefore();
 
 init();
 
@@ -58,12 +85,22 @@ function init() {
       renderLeaderboard();
     });
   });
+  if (endGameButton) {
+    endGameButton.addEventListener('click', handleEndGameToggle);
+  }
+  if (resetGameButton) {
+    resetGameButton.addEventListener('click', handleResetGame);
+  }
+  setupSettings();
   setupAvatarPicker();
+  setupInstructions();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
   setupButtonFeedback();
+  maybeAutoOpenInstructions();
+  renderSettingsButtonState();
 }
 
 function setupAvatarPicker() {
@@ -92,6 +129,32 @@ function setupAvatarPicker() {
 
   if (avatarModalClose) {
     avatarModalClose.addEventListener('click', () => closeAvatarModal());
+  }
+}
+
+function setupInstructions() {
+  if (!instructionsButton || !instructionsModal) {
+    shouldAutoOpenInstructions = false;
+    return;
+  }
+  instructionsButton.title = 'How to play';
+  instructionsButton.addEventListener('click', () => {
+    if (instructionsModalOpen) {
+      closeInstructionsModal();
+    } else {
+      openInstructionsModal();
+    }
+  });
+
+  instructionsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'instructions-modal') {
+      closeInstructionsModal();
+    }
+  });
+
+  if (instructionsModalClose) {
+    instructionsModalClose.addEventListener('click', () => closeInstructionsModal());
   }
 }
 
@@ -228,6 +291,112 @@ function handleAvatarModalKeydown(event) {
   }
 }
 
+function openInstructionsModal() {
+  if (!instructionsModal || instructionsModalOpen) return;
+  instructionsModal.classList.remove('hidden');
+  instructionsModal.classList.remove('is-hiding');
+  window.requestAnimationFrame(() => {
+    instructionsModal.classList.add('is-visible');
+  });
+  instructionsModalOpen = true;
+  shouldAutoOpenInstructions = false;
+  if (instructionsButton) {
+    instructionsButton.setAttribute('aria-expanded', 'true');
+  }
+  document.addEventListener('keydown', handleInstructionsKeydown);
+  if (instructionsModalClose) {
+    instructionsModalClose.focus({ preventScroll: true });
+  }
+}
+
+function closeInstructionsModal(force = false) {
+  if (!instructionsModal) return;
+  if (!instructionsModalOpen && !force) return;
+
+  if (force && !instructionsModalOpen) {
+    instructionsModal.classList.add('hidden');
+    instructionsModal.classList.remove('is-visible');
+    instructionsModal.classList.remove('is-hiding');
+    return;
+  }
+
+  instructionsModal.classList.remove('is-visible');
+  if (force) {
+    instructionsModal.classList.add('hidden');
+    instructionsModal.classList.remove('is-hiding');
+  } else {
+    instructionsModal.classList.add('is-hiding');
+    window.setTimeout(() => {
+      if (!instructionsModalOpen) {
+        instructionsModal.classList.add('hidden');
+        instructionsModal.classList.remove('is-hiding');
+      }
+    }, 220);
+  }
+  instructionsModalOpen = false;
+  shouldAutoOpenInstructions = false;
+  markInstructionsSeen();
+  if (instructionsButton) {
+    instructionsButton.setAttribute('aria-expanded', 'false');
+    if (!force) {
+      instructionsButton.focus({ preventScroll: true });
+    }
+  }
+  document.removeEventListener('keydown', handleInstructionsKeydown);
+}
+
+function handleInstructionsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeInstructionsModal();
+  }
+}
+
+function maybeAutoOpenInstructions() {
+  if (!shouldAutoOpenInstructions) return;
+  if (instructionsModalOpen) return;
+  if (player) return;
+
+  openInstructionsModal();
+}
+function setupSettings() {
+  if (!settingsButton || !settingsModal) return;
+  settingsButton.addEventListener('click', () => {
+    if (settingsModalOpen) {
+      closeSettingsModal();
+    } else {
+      openSettingsModal();
+    }
+  });
+
+  settingsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'settings-modal') {
+      closeSettingsModal();
+    }
+  });
+
+  if (settingsModalClose) {
+    settingsModalClose.addEventListener('click', () => closeSettingsModal());
+  }
+
+  if (settingsForm) {
+    settingsForm.addEventListener('submit', handleSettingsSubmit);
+  }
+
+  difficultyInputs.forEach(input => {
+    input.addEventListener('change', handleDifficultyChange);
+  });
+
+  roleInputs.forEach(input => {
+    input.addEventListener('change', handleRoleChange);
+    const label = input.closest('label');
+    if (label) {
+      label.addEventListener('click', event => handleRoleOptionClick(event, input));
+    }
+  });
+}
+
 async function restorePlayer() {
   let stored = null;
   try {
@@ -250,14 +419,17 @@ async function restorePlayer() {
     const { player: refreshed } = await silentlyRejoin(stored);
     player = refreshed;
     localStorage.setItem('just-one-player', JSON.stringify(refreshed));
+    shouldAutoOpenSettings = true;
     updateSelectedAvatar(normalizeAvatarChoice(refreshed.avatar));
   } catch (err) {
     console.warn('Failed to restore session', err);
     localStorage.removeItem('just-one-player');
     player = null;
+    shouldAutoOpenSettings = false;
   }
 
   updateLayout();
+  maybeAutoOpenSettings();
 }
 
 async function silentlyRejoin(existing) {
@@ -286,6 +458,7 @@ function openEventStream() {
 }
 
 function onStateChange() {
+  syncSettingsFromServer();
   syncAvailableAvatarsFromServer();
 
   const round = serverState?.round;
@@ -308,6 +481,7 @@ function onStateChange() {
         serverPlayerRecord.name !== player.name ||
         serverPlayerRecord.role !== player.role ||
         serverPlayerRecord.avatar !== player.avatar;
+      
       if (changed) {
         player = { ...player, ...serverPlayerRecord };
         localStorage.setItem('just-one-player', JSON.stringify(player));
@@ -401,8 +575,11 @@ async function handleJoinSubmit(event) {
     player = joined;
     localStorage.setItem('just-one-player', JSON.stringify(joined));
     roleSelect.value = joined.role;
+    shouldAutoOpenSettings = true;
     updateSelectedAvatar(normalizeAvatarChoice(joined.avatar));
     updateLayout();
+    openSettingsModal({ auto: true });
+    maybeAutoOpenSettings();
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
     // error already surfaced by apiPost
@@ -420,6 +597,13 @@ function updateLayout() {
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
     renderLeaderboard();
+    maybeAutoOpenInstructions();
+    renderRoundProgress();
+    renderEndGameControls();
+    renderSettingsButtonState();
+    applySettingsFormState();
+    shouldAutoOpenSettings = false;
+    closeSettingsModal(true);
     return;
   }
 
@@ -429,9 +613,15 @@ function updateLayout() {
   renderPlayerInfo();
   renderPlayers();
   renderScore();
+  renderRoundProgress();
+  renderEndGameControls();
+  renderSettingsButtonState();
   renderControls();
   renderRound();
   renderLeaderboard();
+  applySettingsFormState();
+  renderSettingsButtonState();
+  maybeAutoOpenSettings();
 }
 
 function renderPlayerInfo() {
@@ -462,18 +652,32 @@ function renderPlayerInfo() {
   playerInfo.appendChild(summary);
 
   const round = serverState?.round;
+  const game = serverState?.game;
+  const roundStage = round?.stage ?? null;
 
   if (!round) {
     const prompt = document.createElement('div');
     prompt.className = 'info-card subtle';
-    prompt.textContent = 'Start a round to begin the fun.';
+    if (game?.gameOver) {
+      prompt.textContent = game.gameOverReason === 'completed'
+        ? `Game finished after ${game.roundsCompleted}/${game.totalRounds} rounds.`
+        : 'Game ended early by unanimous vote.';
+    } else {
+      prompt.textContent = 'Start a round to begin the fun.';
+    }
     playerInfo.appendChild(prompt);
-  } else {
+  } else if (roundStage && roundStage !== 'round_result') {
     const notice = document.createElement('div');
     notice.className = 'roles-locked';
     notice.textContent = 'Roles are locked until this round is complete.';
     playerInfo.appendChild(notice);
   }
+
+  const difficultyNote = document.createElement('div');
+  difficultyNote.className = 'settings-summary';
+  const friendlyDifficulty = currentSettings.difficulty === 'hard' ? 'Hard mode' : 'Easy mode';
+  difficultyNote.textContent = `Difficulty: ${friendlyDifficulty}`;
+  playerInfo.appendChild(difficultyNote);
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';
@@ -482,6 +686,7 @@ function renderPlayerInfo() {
   inviteButton.textContent = 'Invite friends';
   inviteButton.addEventListener('click', handleInviteFriends);
   actions.appendChild(inviteButton);
+
   const leaveButton = document.createElement('button');
   leaveButton.type = 'button';
   leaveButton.textContent = 'Leave table';
@@ -528,7 +733,9 @@ function renderPlayerBadge(playerRecord) {
   if (player && player.id === playerRecord.id) {
     pill.classList.add('is-self');
   }
-
+  const voted = Boolean(playerRecord?.votedToEnd);
+  if (voted) pill.classList.add('has-voted');
+  
   const avatarEl = document.createElement('span');
   avatarEl.className = 'player-pill-avatar';
   avatarEl.textContent = playerRecord.avatar || defaultAvatar;
@@ -538,6 +745,13 @@ function renderPlayerBadge(playerRecord) {
   nameEl.className = 'player-pill-name';
   nameEl.textContent = playerRecord.name;
   pill.appendChild(nameEl);
+  
+  if (voted) {
+    const indicator = document.createElement('span');
+    indicator.className = 'player-vote-indicator';
+    indicator.textContent = '🔴';
+    pill.appendChild(indicator);
+  }
 
   return pill;
 }
@@ -548,10 +762,90 @@ function renderScore() {
     scoreboardEl.textContent = '';
     return;
   }
-  const stage = serverState.round?.stage ?? 'waiting';
-  stageIndicator.textContent = formatStage(stage);
+  const round = serverState.round;
+  const game = serverState.game;
+  if (game?.gameOver) {
+    stageIndicator.textContent = game.gameOverReason === 'completed'
+      ? 'Game finished'
+      : 'Game ended early';
+  } else {
+    const stage = round?.stage ?? 'waiting';
+    stageIndicator.textContent = formatStage(stage);
+  }
   const { success, failure } = serverState.score;
   scoreboardEl.textContent = `Score: ${success} correct · ${failure} misses`;
+}
+
+function renderRoundProgress() {
+  if (!roundProgressEl) return;
+  if (!serverState?.game) {
+    roundProgressEl.textContent = '';
+    return;
+  }
+  const { totalRounds = 0, roundsCompleted = 0 } = serverState.game;
+  if (!totalRounds) {
+    roundProgressEl.textContent = '';
+    return;
+  }
+  const roundActive = Boolean(serverState.round) && !serverState.game.gameOver;
+  const displayNumber = Math.min(totalRounds, roundActive ? roundsCompleted + 1 : roundsCompleted);
+  const label = roundActive
+    ? `Round ${displayNumber}/${totalRounds} (in progress)`
+    : `Round ${roundsCompleted}/${totalRounds}`;
+  roundProgressEl.textContent = label;
+}
+
+function renderEndGameControls() {
+  if (!endGameButton || !endGameStatus) return;
+  if (!serverState?.game) {
+    endGameButton.disabled = true;
+    endGameButton.textContent = 'End game early';
+    endGameStatus.textContent = '';
+    if (resetGameButton) resetGameButton.classList.add('hidden');
+    return;
+  }
+
+  const game = serverState.game;
+  const totalPlayers = serverState.players.length;
+  const votes = Number(game.endGameVotes?.count ?? 0);
+  const playerRecord = player ? serverState.players.find(p => p.id === player.id) : null;
+  const hasVoted = Boolean(playerRecord?.votedToEnd);
+
+  if (game.gameOver) {
+    endGameButton.disabled = true;
+    endGameButton.textContent = 'Game ended';
+    endGameStatus.textContent = game.gameOverReason === 'completed'
+      ? `All ${game.roundsCompleted}/${game.totalRounds} rounds completed.`
+      : 'Ended early by player votes.';
+    if (resetGameButton) {
+      resetGameButton.classList.remove('hidden');
+      resetGameButton.disabled = !player;
+    }
+    return;
+  }
+
+  const canVote = Boolean(player) && totalPlayers > 0;
+  endGameButton.disabled = !canVote;
+  endGameButton.textContent = hasVoted ? 'Withdraw vote' : 'End game early';
+  const baseStatus = totalPlayers > 0
+    ? `Votes to end: ${votes}/${totalPlayers}`
+    : 'Waiting for players to join.';
+  endGameStatus.textContent = canVote ? baseStatus : `${baseStatus}${player ? '' : ' (join to vote)'}`;
+  if (resetGameButton) {
+    resetGameButton.classList.add('hidden');
+  }
+}
+
+function renderSettingsButtonState() {
+  if (!settingsButton) return;
+  const canEdit = canEditSettings();
+  settingsButton.disabled = !canEdit;
+  settingsButton.title = canEdit
+    ? 'Adjust game settings'
+    : 'Settings available between rounds';
+  if (!canEdit && settingsModalOpen) {
+    closeSettingsModal(true);
+  }
 }
 
 function renderLeaderboard() {
@@ -688,11 +982,23 @@ function renderControls() {
   if (!player || !serverState) return;
 
   const round = serverState.round;
+  const game = serverState.game;
   if (!round) {
     const prompt = document.createElement('div');
-    prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
+    const gameOver = Boolean(game?.gameOver);
+    if (gameOver) {
+      const reason = game.gameOverReason === 'completed'
+        ? `Game complete after ${game.roundsCompleted}/${game.totalRounds} rounds.`
+        : 'Game ended early by unanimous vote.';
+      prompt.className = 'info-card subtle';
+      prompt.textContent = `${reason} Update settings to start a new game.`;
+    } else {
+      prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
+    }
     controlsEl.appendChild(prompt);
-    controlsEl.appendChild(buildButton('Start new round', () => startRound()));
+    const startButton = buildButton('Start new round', () => startRound());
+    startButton.disabled = Boolean(game?.gameOver);
+    controlsEl.appendChild(startButton);
     return;
   }
 
@@ -771,6 +1077,13 @@ function renderRound() {
     empty.textContent = 'No round in progress yet.';
     roundEl.appendChild(empty);
     return;
+  }
+
+  if (typeof round.number === 'number') {
+    const badge = document.createElement('div');
+    badge.className = 'round-number-badge';
+    badge.textContent = `Round ${round.number}`;
+    roundEl.appendChild(badge);
   }
 
   if (player.role === 'hint' && currentWord) {
@@ -1046,6 +1359,325 @@ function showMessage(text, type = 'info') {
   }, 3000);
 }
 
+function openSettingsModal({ auto = false } = {}) {
+  if (!settingsModal || !settingsButton) return;
+  if (!canEditSettings()) {
+    if (!auto) {
+      showMessage('Finish the current round before updating settings.', 'error');
+    }
+    return;
+  }
+  settingsModal.classList.remove('hidden');
+  settingsModal.classList.remove('is-hiding');
+  settingsModal.classList.add('is-visible');
+  settingsModalOpen = true;
+  shouldAutoOpenSettings = false;
+  settingsButton.setAttribute('aria-expanded', 'true');
+  applySettingsFormState();
+  if (settingsTotalRoundsInput) {
+    settingsTotalRoundsInput.value = String(currentSettings.totalRounds ?? 10);
+    settingsTotalRoundsInput.focus({ preventScroll: true });
+    settingsTotalRoundsInput.select();
+  }
+  document.addEventListener('keydown', handleSettingsKeydown);
+}
+
+function closeSettingsModal(force = false) {
+  if (!settingsModal || !settingsButton || !settingsModalOpen) {
+    if (force && settingsModal) {
+      settingsModal.classList.add('hidden');
+      settingsModal.classList.remove('is-visible');
+      settingsModal.classList.remove('is-hiding');
+    }
+    return;
+  }
+  settingsModal.classList.remove('is-visible');
+  if (force) {
+    settingsModal.classList.add('hidden');
+    settingsModal.classList.remove('is-hiding');
+  } else {
+    settingsModal.classList.add('is-hiding');
+    window.setTimeout(() => {
+      if (!settingsModalOpen) {
+        settingsModal.classList.add('hidden');
+        settingsModal.classList.remove('is-hiding');
+      }
+    }, 240);
+  }
+  settingsModalOpen = false;
+  settingsButton.setAttribute('aria-expanded', 'false');
+  if (!force) {
+    settingsButton.focus({ preventScroll: true });
+  }
+  hideRoleWarning();
+  document.removeEventListener('keydown', handleSettingsKeydown);
+}
+
+function handleSettingsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeSettingsModal();
+  }
+}
+
+async function handleSettingsSubmit(event) {
+  event.preventDefault();
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  if (!canEditSettings()) {
+    showMessage('Finish the current round before updating settings.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (!settingsTotalRoundsInput) return;
+  const rawValue = Number(settingsTotalRoundsInput.value);
+  const maxRounds = currentSettings.maxRounds ?? 20;
+  if (!Number.isFinite(rawValue) || rawValue < 1 || rawValue > maxRounds) {
+    showMessage(`Choose a number of rounds between 1 and ${maxRounds}.`, 'error');
+    settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    return;
+  }
+  const totalRounds = Math.round(rawValue);
+  const selectedDifficulty = difficultyInputs.find(input => input.checked)?.value === 'hard' ? 'hard' : 'easy';
+  try {
+    const response = await apiPost('/api/settings', {
+      playerId: player.id,
+      totalRounds,
+      difficulty: selectedDifficulty
+    });
+    if (typeof response.totalRounds === 'number') {
+      currentSettings.totalRounds = response.totalRounds;
+    }
+    if (typeof response.difficulty === 'string') {
+      currentSettings.difficulty = response.difficulty === 'hard' ? 'hard' : 'easy';
+    }
+    applySettingsFormState();
+    showMessage('Settings updated.');
+    closeSettingsModal();
+  } catch (err) {
+    applySettingsFormState();
+  }
+}
+
+async function handleDifficultyChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'hard' ? 'hard' : 'easy';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (!canEditSettings()) {
+    showMessage('Finish the current round before updating settings.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === currentSettings.difficulty) {
+    return;
+  }
+  try {
+    const response = await apiPost('/api/settings', {
+      playerId: player.id,
+      difficulty: value,
+      totalRounds: currentSettings.totalRounds
+    });
+    if (typeof response.difficulty === 'string') {
+      currentSettings.difficulty = response.difficulty === 'hard' ? 'hard' : 'easy';
+    }
+    if (typeof response.totalRounds === 'number') {
+      currentSettings.totalRounds = response.totalRounds;
+    }
+    applySettingsFormState();
+    showMessage(value === 'hard' ? 'Hard mode enabled.' : 'Easy mode enabled.');
+  } catch (err) {
+    applySettingsFormState();
+  }
+}
+
+async function handleRoleChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'guesser' ? 'guesser' : 'hint';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  const roundStage = serverState?.round?.stage ?? null;
+  if (roundStage && roundStage !== 'round_result') {
+    showMessage('Finish the current round before changing roles.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === player.role) return;
+
+  try {
+    const { player: updated } = await apiPost('/api/join', {
+      playerId: player.id,
+      name: player.name,
+      role: value
+    });
+    player = updated;
+    localStorage.setItem('just-one-player', JSON.stringify(updated));
+    showMessage(value === 'guesser' ? 'You are now the guesser.' : 'You are now a hint giver.');
+  } catch (err) {
+    if (typeof err?.message === 'string' && err.message.toLowerCase().includes('guesser')) {
+      showRoleLimitWarning();
+    }
+  } finally {
+    applySettingsFormState();
+  }
+}
+
+function handleRoleOptionClick(event, input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  if (!input.disabled) return;
+  if (!player) return;
+  if (input.value !== 'guesser') return;
+  const roundStage = serverState?.round?.stage ?? null;
+  if (roundStage && roundStage !== 'round_result') return;
+  const guesserTaken = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player.id));
+  if (!guesserTaken) return;
+  event.preventDefault();
+  showRoleLimitWarning();
+}
+
+function showRoleLimitWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.textContent = 'There can be a maximum of one guesser at any time.';
+  roleWarningEl.classList.add('is-visible');
+  roleWarningTimeout = window.setTimeout(() => {
+    roleWarningEl.classList.remove('is-visible');
+    roleWarningTimeout = null;
+    roleWarningClearTimeout = window.setTimeout(() => {
+      roleWarningEl.textContent = '';
+      roleWarningClearTimeout = null;
+    }, 220);
+  }, 2400);
+}
+
+function hideRoleWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.classList.remove('is-visible');
+  roleWarningEl.textContent = '';
+}
+
+function applySettingsFormState() {
+  const canEdit = canEditSettings();
+  if (settingsTotalRoundsInput) {
+    const focused = document.activeElement === settingsTotalRoundsInput;
+    if (!focused) {
+      settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    }
+    settingsTotalRoundsInput.min = '1';
+    settingsTotalRoundsInput.max = String(currentSettings.maxRounds);
+    settingsTotalRoundsInput.disabled = !canEdit;
+  }
+  const currentDifficulty = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
+  difficultyInputs.forEach(input => {
+    input.checked = input.value === currentDifficulty;
+    input.disabled = !canEdit;
+  });
+
+  const roundStage = serverState?.round?.stage ?? null;
+  const roundLocked = Boolean(roundStage && roundStage !== 'round_result');
+  const currentRole = player?.role === 'guesser' ? 'guesser' : 'hint';
+  const otherGuesserExists = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player?.id));
+  roleInputs.forEach(input => {
+    const isGuesser = input.value === 'guesser';
+    input.checked = input.value === currentRole;
+    const disableBecauseNoPlayer = !player;
+    const disableBecauseRound = roundLocked;
+    const disableBecauseTaken = isGuesser && otherGuesserExists && currentRole !== 'guesser';
+    input.disabled = disableBecauseNoPlayer || disableBecauseRound || disableBecauseTaken;
+  });
+  if (!player || roundLocked || currentRole === 'guesser' || !otherGuesserExists) {
+    hideRoleWarning();
+  }
+}
+
+function maybeAutoOpenSettings() {
+  if (!shouldAutoOpenSettings) return;
+  if (!player) return;
+  if (settingsModalOpen) return;
+  if (!canEditSettings()) return;
+  openSettingsModal({ auto: true });
+}
+
+function syncSettingsFromServer() {
+  const game = serverState?.game;
+  const settings = serverState?.settings;
+  if (!game && !settings) return;
+  const nextTotal = Number.isFinite(game?.totalRounds) ? Number(game.totalRounds) : currentSettings.totalRounds;
+  const nextMax = Number.isFinite(game?.maxRounds) ? Number(game.maxRounds) : currentSettings.maxRounds;
+  const nextDifficulty = settings?.difficulty === 'hard'
+    ? 'hard'
+    : settings?.difficulty === 'easy'
+      ? 'easy'
+      : currentSettings.difficulty;
+  const changed = nextTotal !== currentSettings.totalRounds
+    || nextMax !== currentSettings.maxRounds
+    || nextDifficulty !== currentSettings.difficulty;
+  currentSettings = {
+    totalRounds: nextTotal,
+    maxRounds: nextMax,
+    difficulty: nextDifficulty
+  };
+  if (settingsTotalRoundsInput) {
+    settingsTotalRoundsInput.max = String(currentSettings.maxRounds);
+    if (changed && settingsModalOpen) {
+      settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    }
+  }
+}
+
+function canEditSettings() {
+  return Boolean(player) && !serverState?.round;
+}
+
+async function handleEndGameToggle() {
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  if (!serverState?.game) return;
+  if (serverState.game.gameOver) {
+    showMessage('Game already ended.', 'error');
+    return;
+  }
+
+  const playerRecord = serverState.players.find(p => p.id === player.id);
+  const hasVoted = Boolean(playerRecord?.votedToEnd);
+  try {
+    await apiPost('/api/game/end-vote', {
+      playerId: player.id,
+      vote: !hasVoted
+    });
+    showMessage(!hasVoted ? 'Vote recorded.' : 'Vote withdrawn.');
+  } catch (err) {
+    // message surfaced
+  }
+}
+
 async function handleInviteFriends() {
   const value = window.location.origin;
   try {
@@ -1074,6 +1706,19 @@ async function handleInviteFriends() {
   }
 }
 
+async function handleResetGame() {
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  try {
+    await apiPost('/api/game/reset', { playerId: player.id });
+    showMessage('Game reset. Ready for a new round.');
+    shouldAutoOpenSettings = false;
+    updateLayout();
+  } catch (err) {}
+}
+
 async function handleLeaveTable() {
   if (!player) return;
   const leavingId = player.id;
@@ -1086,6 +1731,7 @@ async function handleLeaveTable() {
   player = null;
   nameInput.value = '';
   roleSelect.value = '';
+  shouldAutoOpenSettings = false;
   updateLayout();
   showMessage('You left the table.');
 }
@@ -1194,11 +1840,27 @@ function arraysEqual(a, b) {
 }
 
 function escapeHtml(value) {
-  const str = String(value ?? '')
+  const str = String(value ?? '');
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function markInstructionsSeen() {
+  try {
+    localStorage.setItem(INSTRUCTIONS_STORAGE_KEY, 'true');
+  } catch (err) {
+    // Ignore storage errors (private mode, etc.).
+  }
+}
+
+function hasSeenInstructionsBefore() {
+  try {
+    return localStorage.getItem(INSTRUCTIONS_STORAGE_KEY) === 'true';
+  } catch (err) {
+    return false;
+  }
 }

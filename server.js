@@ -21,6 +21,8 @@ const words = [
   'Pinnacle','Quest','Reverie','Serenade','Timber','Udon','Verdict','Wingman','Yearbook','Zenith'
 ];
 
+const MAX_TOTAL_ROUNDS = 20;
+const DEFAULT_TOTAL_ROUNDS = 10;
 const allowedAvatars = Object.freeze([
   '🦊','🐼','🐸','🦄','🐝','🐢','🐧','🦁','🐙','🐨',
   '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
@@ -39,8 +41,24 @@ const state = {
   round: null,
   score: { success: 0, failure: 0 },
   wordDeck: shuffle([...words]),
-  lastWord: null
+  lastWord: null,
+  gameConfig: {
+    totalRounds: DEFAULT_TOTAL_ROUNDS
+  },
+  settings: {
+    difficulty: 'easy'
+  },
+  roundsCompleted: 0,
+  gameOver: false,
+  gameOverReason: null,
+  endGameVotes: new Set(),
 };
+
+const COMPOUND_PREFIXES = ['after','air','auto','earth','fire','grand','hand','home','inner','light','moon','north','outer','over','rain','shadow','snow','south','space','star','sun','super','under','water','west','wind'];
+const COMPOUND_SUFFIXES = ['craft','field','fire','house','land','light','maker','ship','song','space','sphere','stone','storm','time','town','walk','ward','work'];
+const COMMON_WORD_PARTS = new Set([
+  'ball','book','cloud','dream','forest','gold','heart','light','night','river','road','sky','space','spring','storm','table','watch','wood','world'
+]);
 
 const playerStats = new Map();
 
@@ -89,6 +107,21 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/player/leave' && req.method === 'POST') {
     await handleLeave(req, res);
+    return;
+  }
+
+  if (pathname === '/api/settings' && req.method === 'POST') {
+    await handleUpdateSettings(req, res);
+    return;
+  }
+
+  if (pathname === '/api/game/end-vote' && req.method === 'POST') {
+    await handleToggleEndVote(req, res);
+    return;
+  }
+
+  if (pathname === '/api/game/reset' && req.method === 'POST') {
+    await handleResetGame(req, res);
     return;
   }
 
@@ -271,6 +304,7 @@ async function handleJoin(req, res) {
     }
 
     syncPlayerStats(player.id, player.name);
+    state.endGameVotes.delete(player.id);
 
     respond(res, 200, { player });
     broadcastState();
@@ -299,6 +333,17 @@ async function handleStartRound(req, res) {
     }
     touchPlayer(player);
 
+    if (state.gameOver) {
+      respond(res, 409, { error: 'Game already finished. Update settings to start a new game.' });
+      return;
+    }
+
+    if (state.roundsCompleted >= state.gameConfig.totalRounds) {
+      endGame('completed');
+      respond(res, 409, { error: 'Game already finished. Update settings to start a new game.' });
+      return;
+    }
+
     if (!state.players.some(p => p.role === 'guesser')) {
       respond(res, 400, { error: 'Add a guesser before starting' });
       return;
@@ -314,6 +359,8 @@ async function handleStartRound(req, res) {
       return;
     }
 
+    state.endGameVotes.clear();
+
     const word = drawWord();
     state.round = {
       id: randomUUID(),
@@ -325,7 +372,8 @@ async function handleStartRound(req, res) {
       guess: null,
       revealedAt: null,
       finishedAt: null,
-      statsApplied: false
+      statsApplied: false,
+      number: state.roundsCompleted + 1
     };
 
     respond(res, 200, { roundId: state.round.id, wordAvailable: true });
@@ -359,6 +407,14 @@ async function handleSubmitHint(req, res) {
     if (!text) {
       respond(res, 400, { error: 'Hint text is required' });
       return;
+    }
+
+    if (state.settings?.difficulty === 'hard') {
+      const validationError = validateHardModeHint(text);
+      if (validationError) {
+        respond(res, 400, { error: validationError });
+        return;
+      }
     }
 
     const existing = state.round.hints.find(h => h.playerId === player.id);
@@ -571,13 +627,205 @@ async function handleLeave(req, res) {
       respond(res, 200, { success: true });
       return;
     }
-    removePlayer(playerId);
+    const ended = removePlayer(playerId);
+    if (state.players.length === 0) {
+      resetGameStateToDefaults();
+    }
     respond(res, 200, { success: true });
-    broadcastState();
+    if (!ended) {
+      broadcastState();
+    }
   } catch (err) {
     respond(res, 400, { error: err.message });
   }
 }
+
+async function handleUpdateSettings(req, res) {
+  try {
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    if (state.round) {
+      respond(res, 409, { error: 'Wait for the current round to finish before updating settings' });
+      return;
+    }
+
+    const hasTotalRounds = Object.prototype.hasOwnProperty.call(body, 'totalRounds');
+    const hasDifficulty = Object.prototype.hasOwnProperty.call(body, 'difficulty');
+
+    if (!hasTotalRounds && !hasDifficulty) {
+      respond(res, 200, {
+        totalRounds: state.gameConfig.totalRounds,
+        difficulty: state.settings.difficulty
+      });
+      return;
+    }
+
+    let nextTotal = state.gameConfig.totalRounds;
+    if (hasTotalRounds) {
+      const normalized = normalizeTotalRounds(body.totalRounds);
+      if (normalized === null) {
+        respond(res, 400, { error: `Total rounds must be between 1 and ${MAX_TOTAL_ROUNDS}` });
+        return;
+      }
+      nextTotal = normalized;
+    }
+
+    let nextDifficulty = state.settings?.difficulty || 'easy';
+    if (hasDifficulty) {
+      const difficultyRaw = typeof body.difficulty === 'string' ? body.difficulty.toLowerCase() : '';
+      if (difficultyRaw === 'hard' || difficultyRaw === 'easy') {
+        nextDifficulty = difficultyRaw;
+      } else {
+        respond(res, 400, { error: 'Difficulty must be "easy" or "hard"' });
+        return;
+      }
+    }
+
+    const totalChanged = nextTotal !== state.gameConfig.totalRounds;
+    const difficultyChanged = nextDifficulty !== (state.settings?.difficulty || 'easy');
+
+    if (totalChanged) {
+      state.gameConfig.totalRounds = nextTotal;
+      resetGameProgress();
+    }
+
+    if (!state.settings) {
+      state.settings = { difficulty: nextDifficulty };
+    } else if (difficultyChanged) {
+      state.settings.difficulty = nextDifficulty;
+    }
+
+    respond(res, 200, {
+      totalRounds: state.gameConfig.totalRounds,
+      difficulty: state.settings.difficulty
+    });
+
+    if (totalChanged || difficultyChanged) {
+      broadcastState();
+    }
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
+async function handleToggleEndVote(req, res) {
+  try {
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    if (state.gameOver) {
+      respond(res, 409, { error: 'Game already ended' });
+      return;
+    }
+
+    const vote = Boolean(body.vote);
+    if (vote) {
+      state.endGameVotes.add(player.id);
+    } else {
+      state.endGameVotes.delete(player.id);
+    }
+
+    const ended = evaluateEndGameVotes();
+    respond(res, 200, {
+      votes: state.endGameVotes.size,
+      required: state.players.length,
+      ended
+    });
+    if (!ended) {
+      broadcastState();
+    }
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
+async function handleResetGame(req, res) {
+  try {
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    if (state.round && !state.gameOver) {
+      respond(res, 409, { error: 'Wait for the current round to finish before resetting' });
+      return;
+    }
+
+    resetGameProgress();
+    state.wordDeck = shuffle([...words]);
+    state.lastWord = null;
+    state.score = { success: 0, failure: 0 };
+    if (!state.settings) {
+      state.settings = { difficulty: 'easy' };
+    } else if (!state.settings.difficulty) {
+      state.settings.difficulty = 'easy';
+    }
+    broadcastState();
+    respond(res, 200, { success: true });
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
+function normalizeTotalRounds(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const rounded = Math.round(numeric);
+  if (rounded < 1 || rounded > MAX_TOTAL_ROUNDS) return null;
+  return rounded;
+}
+
+function resetGameProgress() {
+  state.roundsCompleted = 0;
+  state.gameOver = false;
+  state.gameOverReason = null;
+  state.endGameVotes.clear();
+  state.round = null;
+  state.score = { success: 0, failure: 0 };
+}
+
+function evaluateEndGameVotes() {
+  if (state.gameOver) return false;
+  const required = state.players.length;
+  if (required > 0 && state.endGameVotes.size >= required) {
+    endGame('votes');
+    return true;
+  }
+  return false;
+}
+
+function endGame(reason, { preserveRound = false, broadcast = true } = {}) {
+  if (state.gameOver && reason !== 'reset') {
+    return false;
+  }
+  state.gameOver = true;
+  state.gameOverReason = reason;
+  state.endGameVotes.clear();
+  if (!preserveRound) {
+    state.round = null;
+  } else if (state.round) {
+    state.round.finishedAt = state.round.finishedAt || Date.now();
+  }
+  if (broadcast) {
+    broadcastState();
+  }
+  return true;
+}
+
 
 function respond(res, status, payload) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -590,6 +838,7 @@ function findPlayer(playerId) {
 
 function removePlayer(playerId) {
   state.players = state.players.filter(p => p.id !== playerId);
+  state.endGameVotes.delete(playerId);
   if (state.round) {
     state.round.hints = state.round.hints.filter(h => h.playerId !== playerId);
     if (state.round.guess && state.round.guess.playerId === playerId) {
@@ -606,6 +855,15 @@ function removePlayer(playerId) {
       }
     }
   }
+  return evaluateEndGameVotes();
+}
+
+function resetGameStateToDefaults() {
+  state.round = null;
+  state.score = { success: 0, failure: 0 };
+  state.wordDeck = shuffle([...words]);
+  state.lastWord = null;
+  state.settings.difficulty = 'easy';
 }
 
 function touchPlayer(player) {
@@ -662,6 +920,7 @@ function serializeState() {
     ? {
         id: state.round.id,
         stage: state.round.stage,
+        number: state.round.number ?? state.roundsCompleted + 1,
         hints: state.round.hints.map(hint => ({
           id: hint.id,
           playerId: hint.playerId,
@@ -694,13 +953,70 @@ function serializeState() {
       id: player.id,
       name: player.name,
       role: player.role,
+      votedToEnd: state.endGameVotes.has(player.id),
       avatar: player.avatar || defaultAvatar
     })),
     round,
     score: state.score,
     leaderboard: buildLeaderboard(),
+    game: {
+      totalRounds: state.gameConfig.totalRounds,
+      maxRounds: MAX_TOTAL_ROUNDS,
+      roundsCompleted: state.roundsCompleted,
+      gameOver: state.gameOver,
+      gameOverReason: state.gameOverReason,
+      endGameVotes: {
+        voters: Array.from(state.endGameVotes),
+        count: state.endGameVotes.size,
+        required: state.players.length
+      }
+    },
+    settings: {
+      difficulty: state.settings?.difficulty || 'easy'
+    },
     availableAvatars: allowedAvatars
   };
+}
+
+function validateHardModeHint(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return 'Hint text is required';
+  if (containsMultipleWords(trimmed)) return 'Hint cannot contain more than one word';
+  if (isProperNounWord(trimmed)) return 'Proper nouns are not allowed';
+  return null;
+}
+
+function containsMultipleWords(text) {
+  if (/\s/.test(text)) return true;
+  if (/[\-_/]/.test(text)) return true;
+  if (/[a-z][A-Z]/.test(text)) return true;
+  const alphaOnly = text.replace(/[^A-Za-z]/g, '');
+  if (!alphaOnly) return false;
+  if (alphaOnly.length >= 6 && looksLikeCompoundWord(alphaOnly.toLowerCase())) return true;
+  return false;
+}
+
+function isProperNounWord(word) {
+  const parts = word.split(/[^A-Za-z]+/).filter(Boolean);
+  if (parts.length === 0) return false;
+  return parts.some(part => {
+    if (part.length <= 1) return false;
+    if (/^[A-Z][a-z]+$/.test(part)) return true;
+    if (/^[A-Z]{2,}$/.test(part)) return true;
+    return false;
+  });
+}
+
+function looksLikeCompoundWord(word) {
+  for (const prefix of COMPOUND_PREFIXES) {
+    if (word.startsWith(prefix) && word.length - prefix.length >= 3) {
+      const suffix = word.slice(prefix.length);
+      if (COMPOUND_SUFFIXES.includes(suffix) || COMPOUND_PREFIXES.includes(suffix) || COMMON_WORD_PARTS.has(suffix)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function syncPlayerStats(playerId, name) {
@@ -738,6 +1054,10 @@ function finalizeCurrentRoundStats() {
   }
   applyRoundToStats(state.round);
   state.round.statsApplied = true;
+  state.roundsCompleted += 1;
+  if (state.roundsCompleted >= state.gameConfig.totalRounds) {
+    endGame('completed', { preserveRound: true, broadcast: false });
+  }
 }
 
 function applyRoundToStats(round) {
