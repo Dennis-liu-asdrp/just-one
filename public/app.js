@@ -193,6 +193,38 @@ async function simulateRandomClickAway(excludeElement) {
   }
 }
 
+function captureClueFocusState() {
+  const active = document.activeElement;
+  if (active instanceof HTMLTextAreaElement && active.name === 'clue') {
+    const selectionStart = typeof active.selectionStart === 'number' ? active.selectionStart : active.value.length;
+    const selectionEnd = typeof active.selectionEnd === 'number' ? active.selectionEnd : selectionStart;
+    const selectionDirection = typeof active.selectionDirection === 'string' ? active.selectionDirection : 'none';
+    return {
+      shouldRestore: true,
+      selectionStart,
+      selectionEnd,
+      selectionDirection
+    };
+  }
+  return { shouldRestore: false };
+}
+
+function restoreClueFocus(textarea, focusState) {
+  if (!focusState?.shouldRestore) return;
+  if (!(textarea instanceof HTMLTextAreaElement)) return;
+  if (textarea.readOnly || textarea.disabled) return;
+  textarea.focus({ preventScroll: true });
+  try {
+    textarea.setSelectionRange(
+      focusState.selectionStart,
+      focusState.selectionEnd,
+      focusState.selectionDirection
+    );
+  } catch (err) {
+    // Ignore selection errors (e.g., textarea detached).
+  }
+}
+
 function setupAvatarPicker() {
   if (!avatarOptionsContainer) return;
   renderAvatarOptions();
@@ -1358,6 +1390,7 @@ function setControlsMessage(text) {
 }
 
 function renderRound() {
+  const clueFocusState = captureClueFocusState();
   roundEl.innerHTML = '';
   if (!player || !serverState) return;
 
@@ -1590,6 +1623,7 @@ function renderRound() {
       }
     }
     roundEl.appendChild(form);
+    restoreClueFocus(textarea, clueFocusState);
     if (playerLocked) {
       const notice = document.createElement('div');
       notice.className = 'info-card subtle';
