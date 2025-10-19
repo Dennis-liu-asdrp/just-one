@@ -1565,6 +1565,29 @@ button.pulse {
   font-style: italic;
 }
 
+.hint-inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+}
+
+.hint-inline-form input[name="clue"] {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.hint-inline-submit {
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  box-shadow: none;
+}
+
 .hint-item.invalid .meta {
   color: rgba(255, 228, 230, 0.85);
 }
