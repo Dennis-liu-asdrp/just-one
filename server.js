@@ -367,6 +367,7 @@ async function handleStartRound(req, res) {
       finishedAt: null,
       statsApplied: false,
       number: state.roundsCompleted + 1,
+      reviewLocks: new Set()
       reviewLocks: new Set(),
       typingHints: new Set()
     };
@@ -678,6 +679,56 @@ async function handleGetWord(req, res, params) {
   }
 }
 
+function getRoundReviewLockSet(createIfMissing = true) {
+  if (!state.round) return new Set();
+  const current = state.round.reviewLocks;
+  if (current instanceof Set) {
+    return current;
+  }
+  if (Array.isArray(current)) {
+    const set = new Set(current);
+    if (createIfMissing) {
+      state.round.reviewLocks = set;
+    }
+    return set;
+  }
+  if (!current) {
+    if (createIfMissing) {
+      const set = new Set();
+      state.round.reviewLocks = set;
+      return set;
+    }
+    return new Set();
+  }
+  const set = new Set(Array.from(current));
+  if (createIfMissing) {
+    state.round.reviewLocks = set;
+  }
+  return set;
+}
+
+function allHintGiversLocked() {
+  if (!state.round) return false;
+  const locks = getRoundReviewLockSet(false);
+  if (locks.size === 0) return false;
+  const hintPlayers = state.players.filter(p => p.role === 'hint');
+  if (hintPlayers.length === 0) return false;
+  return hintPlayers.every(player => {
+    const contributed = state.round.hints.some(hint => hint.playerId === player.id);
+    return contributed && locks.has(player.id);
+  });
+}
+
+function maybeEnterReviewStage() {
+  if (!state.round) return false;
+  if (state.round.stage !== 'collecting_hints') return false;
+  if (!state.round.hints.length) return false;
+  if (!allHintGiversLocked()) return false;
+  state.round.stage = 'reviewing_hints';
+  state.round.reviewStartedAt = Date.now();
+  return true;
+}
+
 async function handleLeave(req, res) {
   try {
     const body = await readBody(req);
@@ -905,10 +956,8 @@ function removePlayer(playerId) {
   state.endGameVotes.delete(playerId);
   if (state.round) {
     state.round.hints = state.round.hints.filter(h => h.playerId !== playerId);
-    const locks = getRoundReviewLockSet(false);
+    const locks = getRoundReviewLockSet();
     locks.delete(playerId);
-    const typingHints = getRoundTypingSet(false);
-    typingHints.delete(playerId);
     maybeEnterReviewStage();
     if (state.round.guess && state.round.guess.playerId === playerId) {
       state.round.guess = null;
@@ -1078,7 +1127,6 @@ function serializeState() {
           avatar: hint.avatar || getPlayerAvatar(hint.playerId)
         })),
         reviewLocks: Array.from(getRoundReviewLockSet(false)),
-        typingHints: Array.from(getRoundTypingSet(false)),
         guess: state.round.guess
           ? {
               playerId: state.round.guess.playerId,
