@@ -134,6 +134,78 @@ function init() {
   renderSettingsButtonState();
 }
 
+function simulateRandomClickAway(excludeElement) {
+  if (typeof document === 'undefined' || !document.body) return;
+  const viewportWidth = window.innerWidth || document.documentElement?.clientWidth;
+  const viewportHeight = window.innerHeight || document.documentElement?.clientHeight;
+  if (!viewportWidth || !viewportHeight) return;
+
+  const rect = typeof excludeElement?.getBoundingClientRect === 'function'
+    ? excludeElement.getBoundingClientRect()
+    : null;
+  const attempts = 12;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const clientX = Math.random() * viewportWidth;
+    const clientY = Math.random() * viewportHeight;
+    if (rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+      continue;
+    }
+    dispatchSyntheticClick(Math.round(clientX), Math.round(clientY));
+    return;
+  }
+  if (excludeElement && typeof excludeElement.blur === 'function') {
+    excludeElement.blur();
+  }
+
+  function dispatchSyntheticClick(clientX, clientY) {
+    const spot = document.createElement('div');
+    spot.dataset.randomClickHelper = 'true';
+    spot.style.position = 'fixed';
+    spot.style.left = `${clientX}px`;
+    spot.style.top = `${clientY}px`;
+    spot.style.width = '1px';
+    spot.style.height = '1px';
+    spot.style.zIndex = '2147483647';
+    spot.style.pointerEvents = 'auto';
+    document.body.appendChild(spot);
+
+    const baseEventInit = {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      screenX: (window.screenX || 0) + clientX,
+      screenY: (window.screenY || 0) + clientY
+    };
+
+    if (typeof PointerEvent === 'function') {
+      const pointerDown = new PointerEvent('pointerdown', {
+        ...baseEventInit,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true
+      });
+      const pointerUp = new PointerEvent('pointerup', {
+        ...baseEventInit,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true
+      });
+      spot.dispatchEvent(pointerDown);
+      spot.dispatchEvent(pointerUp);
+    } else {
+      const mouseDown = new MouseEvent('mousedown', baseEventInit);
+      const mouseUp = new MouseEvent('mouseup', baseEventInit);
+      spot.dispatchEvent(mouseDown);
+      spot.dispatchEvent(mouseUp);
+    }
+
+    const click = new MouseEvent('click', baseEventInit);
+    spot.dispatchEvent(click);
+    spot.remove();
+  }
+}
+
 function setupAvatarPicker() {
   if (!avatarOptionsContainer) return;
   renderAvatarOptions();
@@ -1530,6 +1602,7 @@ function renderRound() {
       form.addEventListener('submit', async evt => {
         evt.preventDefault();
         if (!textarea) return;
+        simulateRandomClickAway(textarea);
         const value = textarea.value.trim();
         if (!value) {
           showMessage('Clue cannot be empty.', 'error');
