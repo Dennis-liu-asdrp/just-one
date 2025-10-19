@@ -79,6 +79,18 @@
 
           <section id="players"></section>
           <section id="controls"></section>
+          <section id="hint-chat" class="hint-chat hidden" aria-label="Hint chat">
+            <header class="hint-chat-header">
+              <h3>Hint chat</h3>
+              <span id="hint-chat-status" class="hint-chat-status"></span>
+            </header>
+            <div id="hint-chat-messages" class="hint-chat-messages" role="log" aria-live="polite"></div>
+            <form id="hint-chat-form" class="hint-chat-form">
+              <label class="sr-only" for="hint-chat-input">Type your message</label>
+              <input id="hint-chat-input" type="text" maxlength="280" autocomplete="off" placeholder="Discuss collisions here…" />
+              <button type="submit">Send</button>
+            </form>
+          </section>
           <section id="round"></section>
         </div>
       </div>
