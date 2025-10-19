@@ -10,6 +10,13 @@ const playersEl = document.getElementById('players');
 const controlsEl = document.getElementById('controls');
 const roundEl = document.getElementById('round');
 const messagesEl = document.getElementById('messages');
+const settingsButton = document.getElementById('settings-button');
+const settingsModal = document.getElementById('settings-modal');
+const settingsModalClose = document.getElementById('settings-modal-close');
+const settingsForm = document.getElementById('settings-form');
+const difficultyInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-difficulty"]')) : [];
+const roleInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-role"]')) : [];
+const roleWarningEl = document.getElementById('role-warning');
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -40,6 +47,11 @@ let lastKnownStage = null;
 let currentWord = null;
 let buttonFeedbackInitialized = false;
 let audioContext = null;
+let settingsModalOpen = false;
+let shouldAutoOpenSettings = false;
+let currentSettings = { difficulty: 'easy' };
+let roleWarningTimeout = null;
+let roleWarningClearTimeout = null;
 let availableAvatars = [...fallbackAvatars];
 let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
@@ -58,12 +70,14 @@ function init() {
       renderLeaderboard();
     });
   });
+  setupSettings();
   setupAvatarPicker();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
   setupButtonFeedback();
+  renderSettingsButtonState();
 }
 
 function setupAvatarPicker() {
@@ -250,6 +264,7 @@ async function restorePlayer() {
     const { player: refreshed } = await silentlyRejoin(stored);
     player = refreshed;
     localStorage.setItem('just-one-player', JSON.stringify(refreshed));
+    shouldAutoOpenSettings = true;
     updateSelectedAvatar(normalizeAvatarChoice(refreshed.avatar));
   } catch (err) {
     console.warn('Failed to restore session', err);
@@ -286,6 +301,7 @@ function openEventStream() {
 }
 
 function onStateChange() {
+  syncSettingsFromServer();
   syncAvailableAvatarsFromServer();
 
   const round = serverState?.round;
@@ -401,8 +417,10 @@ async function handleJoinSubmit(event) {
     player = joined;
     localStorage.setItem('just-one-player', JSON.stringify(joined));
     roleSelect.value = joined.role;
+    shouldAutoOpenSettings = true;
     updateSelectedAvatar(normalizeAvatarChoice(joined.avatar));
     updateLayout();
+    openSettingsModal({ auto: true });
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
     // error already surfaced by apiPost
@@ -420,6 +438,8 @@ function updateLayout() {
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
     renderLeaderboard();
+    closeSettingsModal(true);
+    renderSettingsButtonState();
     return;
   }
 
@@ -432,6 +452,8 @@ function updateLayout() {
   renderControls();
   renderRound();
   renderLeaderboard();
+  renderSettingsButtonState();
+  maybeAutoOpenSettings();
 }
 
 function renderPlayerInfo() {
@@ -462,18 +484,25 @@ function renderPlayerInfo() {
   playerInfo.appendChild(summary);
 
   const round = serverState?.round;
+  const roundStage = round?.stage ?? null;
 
   if (!round) {
     const prompt = document.createElement('div');
     prompt.className = 'info-card subtle';
     prompt.textContent = 'Start a round to begin the fun.';
     playerInfo.appendChild(prompt);
-  } else {
+  } else if (roundStage && roundStage !== 'round_result') {
     const notice = document.createElement('div');
     notice.className = 'roles-locked';
     notice.textContent = 'Roles are locked until this round is complete.';
     playerInfo.appendChild(notice);
   }
+
+  const difficultyNote = document.createElement('div');
+  difficultyNote.className = 'settings-summary';
+  const friendlyDifficulty = currentSettings.difficulty === 'hard' ? 'Hard mode' : 'Easy mode';
+  difficultyNote.textContent = `Difficulty: ${friendlyDifficulty}`;
+  playerInfo.appendChild(difficultyNote);
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';
@@ -482,6 +511,7 @@ function renderPlayerInfo() {
   inviteButton.textContent = 'Invite friends';
   inviteButton.addEventListener('click', handleInviteFriends);
   actions.appendChild(inviteButton);
+
   const leaveButton = document.createElement('button');
   leaveButton.type = 'button';
   leaveButton.textContent = 'Leave table';
@@ -1079,6 +1109,253 @@ async function handleInviteFriends() {
   }
 }
 
+function setupSettings() {
+  if (!settingsButton || !settingsModal) return;
+  settingsButton.addEventListener('click', () => {
+    if (settingsModalOpen) {
+      closeSettingsModal();
+    } else {
+      openSettingsModal();
+    }
+  });
+
+  settingsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'settings-modal') {
+      closeSettingsModal();
+    }
+  });
+
+  if (settingsModalClose) {
+    settingsModalClose.addEventListener('click', () => closeSettingsModal());
+  }
+
+  difficultyInputs.forEach(input => {
+    input.addEventListener('change', handleDifficultyChange);
+  });
+
+  roleInputs.forEach(input => {
+    input.addEventListener('change', handleRoleChange);
+    const label = input.closest('label');
+    if (label) {
+      label.addEventListener('click', event => handleRoleOptionClick(event, input));
+    }
+  });
+}
+
+function openSettingsModal({ auto = false } = {}) {
+  if (!settingsModal || settingsModalOpen) return;
+  settingsModal.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    settingsModal.classList.add('is-visible');
+  });
+  settingsModalOpen = true;
+  shouldAutoOpenSettings = false;
+  if (settingsButton) {
+    settingsButton.setAttribute('aria-expanded', 'true');
+  }
+  applySettingsFormState();
+  document.addEventListener('keydown', handleSettingsKeydown);
+  const activeInput = difficultyInputs.find(input => input.value === currentSettings.difficulty);
+  if (activeInput && !activeInput.disabled) {
+    activeInput.focus({ preventScroll: true });
+  } else if (!auto && settingsModalClose) {
+    settingsModalClose.focus({ preventScroll: true });
+  }
+}
+
+function closeSettingsModal(force = false) {
+  if (!settingsModal) return;
+  if (!settingsModalOpen && !force) return;
+
+  const shouldHideImmediately = force || !settingsModalOpen;
+  settingsModalOpen = false;
+  if (settingsButton) {
+    settingsButton.setAttribute('aria-expanded', 'false');
+  }
+  settingsModal.classList.remove('is-visible');
+  if (shouldHideImmediately) {
+    settingsModal.classList.add('hidden');
+  } else {
+    window.setTimeout(() => {
+      if (!settingsModalOpen) {
+        settingsModal.classList.add('hidden');
+      }
+    }, 220);
+  }
+  hideRoleWarning();
+  document.removeEventListener('keydown', handleSettingsKeydown);
+}
+
+function handleSettingsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeSettingsModal();
+  }
+}
+
+async function handleDifficultyChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'hard' ? 'hard' : 'easy';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === currentSettings.difficulty) {
+    return;
+  }
+  try {
+    await apiPost('/api/settings', {
+      playerId: player.id,
+      difficulty: value
+    });
+    currentSettings.difficulty = value;
+    applySettingsFormState();
+    showMessage(value === 'hard' ? 'Hard mode enabled.' : 'Easy mode enabled.');
+  } catch (err) {
+    applySettingsFormState();
+  }
+}
+
+async function handleRoleChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'guesser' ? 'guesser' : 'hint';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  const roundStage = serverState?.round?.stage ?? null;
+  if (roundStage && roundStage !== 'round_result') {
+    showMessage('Finish the current round before changing roles.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === player.role) return;
+
+  try {
+    const { player: updated } = await apiPost('/api/join', {
+      playerId: player.id,
+      name: player.name,
+      role: value
+    });
+    player = updated;
+    localStorage.setItem('just-one-player', JSON.stringify(updated));
+    showMessage(value === 'guesser' ? 'You are now the guesser.' : 'You are now a hint giver.');
+  } catch (err) {
+    if (typeof err?.message === 'string' && err.message.toLowerCase().includes('guesser')) {
+      showRoleLimitWarning();
+    }
+  } finally {
+    applySettingsFormState();
+  }
+}
+
+function handleRoleOptionClick(event, input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  if (!input.disabled) return;
+  if (!player) return;
+  if (input.value !== 'guesser') return;
+  const roundStage = serverState?.round?.stage ?? null;
+  const roundActive = Boolean(serverState?.round && roundStage !== 'round_result');
+  if (roundActive) return;
+  const guesserTaken = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player.id));
+  if (!guesserTaken) return;
+  event.preventDefault();
+  showRoleLimitWarning();
+}
+
+function showRoleLimitWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.textContent = 'There can be a maximum of one guesser at any time.';
+  roleWarningEl.classList.add('is-visible');
+  roleWarningTimeout = window.setTimeout(() => {
+    roleWarningEl.classList.remove('is-visible');
+    roleWarningTimeout = null;
+    roleWarningClearTimeout = window.setTimeout(() => {
+      roleWarningEl.textContent = '';
+      roleWarningClearTimeout = null;
+    }, 220);
+  }, 2400);
+}
+
+function hideRoleWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.classList.remove('is-visible');
+  roleWarningEl.textContent = '';
+}
+
+function applySettingsFormState() {
+  const current = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
+  const roundStage = serverState?.round?.stage ?? null;
+  const roundActive = Boolean(serverState?.round && roundStage !== 'round_result');
+  difficultyInputs.forEach(input => {
+    input.checked = input.value === current;
+    input.disabled = roundActive;
+  });
+  const currentRole = player?.role === 'guesser' ? 'guesser' : 'hint';
+  const otherGuesserExists = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player?.id));
+  roleInputs.forEach(input => {
+    const isGuesser = input.value === 'guesser';
+    input.checked = input.value === currentRole;
+    const disableBecauseRound = roundActive;
+    const disableBecauseNoPlayer = !player;
+    const disableBecauseTaken = isGuesser && otherGuesserExists && currentRole !== 'guesser';
+    input.disabled = disableBecauseRound || disableBecauseNoPlayer || disableBecauseTaken;
+  });
+  if (!player || roundActive || currentRole === 'guesser' || !otherGuesserExists) {
+    hideRoleWarning();
+  }
+}
+
+function syncSettingsFromServer() {
+  const serverSettings = serverState?.settings;
+  if (!serverSettings) return;
+  const difficulty = serverSettings.difficulty === 'hard' ? 'hard' : 'easy';
+  if (difficulty !== currentSettings.difficulty) {
+    currentSettings.difficulty = difficulty;
+  }
+  applySettingsFormState();
+  renderSettingsButtonState();
+}
+
+function renderSettingsButtonState() {
+  if (!settingsButton) return;
+  settingsButton.disabled = !player;
+  settingsButton.title = player
+    ? 'Adjust game settings'
+    : 'Join the table to edit settings';
+}
+
+function maybeAutoOpenSettings() {
+  if (player && shouldAutoOpenSettings && !settingsModalOpen) {
+    openSettingsModal({ auto: true });
+    }
+    throw new Error('Copy not supported');
+  } catch (err) {
+    showMessage('Copy failed. Copy the link manually from the address bar.', 'error');
+  }
+}
+
 async function handleLeaveTable() {
   if (!player) return;
   const leavingId = player.id;
@@ -1091,6 +1368,7 @@ async function handleLeaveTable() {
   player = null;
   nameInput.value = '';
   roleSelect.value = '';
+  shouldAutoOpenSettings = false;
   updateLayout();
   showMessage('You left the table.');
 }

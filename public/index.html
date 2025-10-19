@@ -56,6 +56,11 @@
         </aside>
 
         <div id="game-main" class="game-main">
+          <button type="button" id="settings-button" class="settings-button" aria-haspopup="dialog" aria-expanded="false">
+            <span class="settings-icon" aria-hidden="true">⚙️</span>
+            <span class="sr-only">Game settings</span>
+          </button>
+
           <div id="player-info"></div>
 
           <div class="status-bar">
@@ -79,6 +84,40 @@
     <ul class="hint-list"></ul>
   </template>
 
+  <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="settings-modal-backdrop" data-dismiss="settings-modal"></div>
+    <div class="settings-modal-panel" role="document">
+      <form id="settings-form" class="settings-form">
+        <header class="settings-header">
+          <h3 id="settings-modal-title">Game settings</h3>
+          <button type="button" id="settings-modal-close" class="settings-modal-close" aria-label="Close settings">×</button>
+        </header>
+        <fieldset class="settings-fieldset">
+          <legend>Difficulty</legend>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="easy" checked />
+            <span>Easy mode</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="hard" />
+            <span>Hard mode</span>
+          </label>
+        </fieldset>
+        <p class="settings-description">Hard mode blocks proper nouns and multi-word hints.</p>
+        <fieldset class="settings-fieldset">
+          <legend>Change role</legend>
+          <p class="settings-note">Switch roles between rounds. Only one guesser can be active.</p>
+          <p id="role-warning" class="settings-warning" aria-live="polite"></p>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="guesser" />
+            <span>Be the guesser</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="hint" checked />
+            <span>Give hints</span>
+          </label>
+        </fieldset>
+      </form>
   <div id="avatar-modal" class="avatar-modal hidden" role="dialog" aria-modal="true" aria-labelledby="avatar-modal-title">
     <div class="avatar-modal-backdrop" data-dismiss="avatar-modal"></div>
     <div class="avatar-modal-panel" role="document">
