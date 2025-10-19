@@ -195,7 +195,7 @@ async function simulateRandomClickAway(excludeElement) {
 
 function captureClueFocusState() {
   const active = document.activeElement;
-  if (active instanceof HTMLTextAreaElement && active.name === 'clue') {
+  if ((active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) && active.name === 'clue') {
     const selectionStart = typeof active.selectionStart === 'number' ? active.selectionStart : active.value.length;
     const selectionEnd = typeof active.selectionEnd === 'number' ? active.selectionEnd : selectionStart;
     const selectionDirection = typeof active.selectionDirection === 'string' ? active.selectionDirection : 'none';
@@ -209,19 +209,21 @@ function captureClueFocusState() {
   return { shouldRestore: false };
 }
 
-function restoreClueFocus(textarea, focusState) {
+function restoreClueFocus(inputEl, focusState) {
   if (!focusState?.shouldRestore) return;
-  if (!(textarea instanceof HTMLTextAreaElement)) return;
-  if (textarea.readOnly || textarea.disabled) return;
-  textarea.focus({ preventScroll: true });
+  const isTextArea = inputEl instanceof HTMLTextAreaElement;
+  const isInput = inputEl instanceof HTMLInputElement;
+  if (!isTextArea && !isInput) return;
+  if (inputEl.readOnly || inputEl.disabled) return;
+  inputEl.focus({ preventScroll: true });
   try {
-    textarea.setSelectionRange(
+    inputEl.setSelectionRange(
       focusState.selectionStart,
       focusState.selectionEnd,
       focusState.selectionDirection
     );
   } catch (err) {
-    // Ignore selection errors (e.g., textarea detached).
+    // Ignore selection errors (e.g., input detached).
   }
 }
 
@@ -1419,13 +1421,45 @@ function renderRound() {
 
   const stage = round.stage;
   const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
-  const playerLocked = player.role === 'hint' && reviewLocks.includes(player.id);
+  const isHintPlayer = player.role === 'hint';
+  const playerLocked = isHintPlayer && reviewLocks.includes(player.id);
+  const roundIdentifier = round.id ?? null;
+  const existingHint = isHintPlayer
+    ? round.hints.find(h => h.playerId === player.id)
+    : null;
 
-  if (player.role === 'hint' && (playerLocked || stage !== 'collecting_hints')) {
+  if (isHintPlayer && stage === 'collecting_hints') {
+    const serverValue = existingHint ? (existingHint.text || '') : '';
+    if (hintDraft.roundId !== roundIdentifier) {
+      hintDraft.roundId = roundIdentifier;
+      hintDraft.syncedValue = serverValue;
+      hintDraft.value = serverValue;
+    } else if (existingHint) {
+      const wasSynced = hintDraft.value === hintDraft.syncedValue;
+      hintDraft.syncedValue = serverValue;
+      if (wasSynced) {
+        hintDraft.value = serverValue;
+      }
+    } else {
+      const wasSynced = hintDraft.value === hintDraft.syncedValue;
+      hintDraft.syncedValue = '';
+      if (wasSynced) {
+        hintDraft.value = '';
+      }
+    }
+  } else if (isHintPlayer && hintDraft.roundId !== roundIdentifier) {
+    const fallbackValue = existingHint ? (existingHint.text || '') : '';
+    hintDraft.roundId = roundIdentifier;
+    hintDraft.syncedValue = fallbackValue;
+    hintDraft.value = fallbackValue;
+  }
+
+  if (isHintPlayer && (playerLocked || stage !== 'collecting_hints')) {
     stopHintTypingImmediate({ notify: true });
   }
 
-  if (round.hints.length > 0) {
+  const shouldShowHintList = isHintPlayer || round.hints.length > 0;
+  if (shouldShowHintList) {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
 
     if (guesserWaiting) {
@@ -1439,14 +1473,27 @@ function renderRound() {
       const list = document.createElement('ul');
       list.className = 'hint-list';
 
-      const hintPlayerCanSeeText = player.role === 'hint' && stage !== 'collecting_hints';
+      const hintPlayerCanSeeText = isHintPlayer && stage !== 'collecting_hints';
       const canSeeText = hintPlayerCanSeeText
         || stage === 'round_result'
         || (player.role === 'guesser' && stage === 'awaiting_guess');
 
-      const hintsForDisplay = player.role === 'guesser' && stage === 'awaiting_guess'
+      let hintsForDisplay = player.role === 'guesser' && stage === 'awaiting_guess'
         ? round.hints.filter(h => !h.invalid)
-        : round.hints;
+        : [...round.hints];
+
+      if (isHintPlayer && stage === 'collecting_hints' && !existingHint) {
+        hintsForDisplay.unshift({
+          id: '__draft__',
+          playerId: player.id,
+          avatar: player.avatar || defaultAvatar,
+          text: hintDraft.value || '',
+          author: player.name || 'You',
+          isDraft: true
+        });
+      }
+
+      let clueInputForFocus = null;
 
       hintsForDisplay.forEach(hint => {
         const li = document.createElement('li');
@@ -1466,16 +1513,64 @@ function renderRound() {
         avatarEl.textContent = hint.avatar || defaultAvatar;
         row.appendChild(avatarEl);
 
-        const textEl = document.createElement('div');
-        textEl.className = 'hint-text';
         const ownHint = hint.playerId === player.id;
-        if (canSeeText || ownHint) {
-          textEl.textContent = hint.text || '';
+        const canEditHint = ownHint && isHintPlayer && stage === 'collecting_hints' && !playerLocked;
+
+        if (canEditHint) {
+          const form = document.createElement('form');
+          form.className = 'hint-inline-form';
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.name = 'clue';
+          input.maxLength = 32;
+          input.placeholder = 'Single word';
+          input.autocomplete = 'off';
+          input.value = hintDraft.value;
+          form.appendChild(input);
+
+          const submitButton = document.createElement('button');
+          submitButton.type = 'submit';
+          submitButton.className = 'hint-inline-submit';
+          submitButton.textContent = 'Submit';
+          form.appendChild(submitButton);
+
+          form.addEventListener('submit', async evt => {
+            evt.preventDefault();
+            await simulateRandomClickAway(input);
+            const value = input.value.trim();
+            if (!value) {
+              showMessage('Clue cannot be empty.', 'error');
+              return;
+            }
+            hintDraft.roundId = roundIdentifier;
+            hintDraft.value = value;
+            stopHintTypingImmediate({ notify: true });
+            await submitHint(value);
+            hintDraft.syncedValue = value;
+            input.value = value;
+          });
+
+          input.addEventListener('input', () => {
+            hintDraft.roundId = roundIdentifier;
+            hintDraft.value = input.value;
+            markHintTypingActivity();
+          });
+
+          input.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
+
+          row.appendChild(form);
+          clueInputForFocus = input;
         } else {
-          textEl.textContent = 'Hidden';
-          textEl.classList.add('hint-text-obscured');
+          const textEl = document.createElement('div');
+          textEl.className = 'hint-text';
+          if (canSeeText || ownHint) {
+            textEl.textContent = hint.text || '';
+          } else {
+            textEl.textContent = 'Hidden';
+            textEl.classList.add('hint-text-obscured');
+          }
+          row.appendChild(textEl);
         }
-        row.appendChild(textEl);
 
         content.appendChild(row);
 
@@ -1541,6 +1636,17 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
+
+      if (clueInputForFocus) {
+        restoreClueFocus(clueInputForFocus, clueFocusState);
+      }
+
+      if (isHintPlayer && playerLocked && stage === 'collecting_hints') {
+        const notice = document.createElement('div');
+        notice.className = 'info-card subtle';
+        notice.textContent = 'Your hint is locked. Waiting for other hint givers.';
+        roundEl.appendChild(notice);
+      }
     }
   } else if (player.role === 'guesser' && stage !== 'round_result') {
     const placeholder = document.createElement('div');
@@ -1549,87 +1655,6 @@ function renderRound() {
       ? 'Hint givers are reviewing clues before revealing them.'
       : 'Waiting for hint givers to submit their clues.';
     roundEl.appendChild(placeholder);
-  }
-
-  if (round.stage === 'collecting_hints' && player.role === 'hint') {
-    const form = document.createElement('form');
-    form.className = 'clue-form';
-    const existing = round.hints.find(h => h.playerId === player.id);
-    const roundIdentifier = round.id ?? null;
-    form.innerHTML = `
-      <label>
-        <span>Your clue</span>
-        <textarea name="clue" maxlength="32" placeholder="Single word"></textarea>
-      </label>
-      <button type="submit">Submit clue</button>
-    `;
-    const textarea = form.querySelector('textarea');
-    const submitButton = form.querySelector('button[type="submit"]');
-    if (!textarea) {
-      roundEl.appendChild(form);
-      return;
-    }
-
-    const serverValue = existing ? (existing.text || '') : '';
-    if (hintDraft.roundId !== roundIdentifier) {
-      hintDraft.roundId = roundIdentifier;
-      hintDraft.syncedValue = serverValue;
-      hintDraft.value = serverValue;
-    } else if (existing) {
-      const wasSynced = hintDraft.value === hintDraft.syncedValue;
-      hintDraft.syncedValue = serverValue;
-      if (wasSynced) {
-        hintDraft.value = serverValue;
-      }
-    } else {
-      const wasSynced = hintDraft.value === hintDraft.syncedValue;
-      hintDraft.syncedValue = '';
-      if (wasSynced) {
-        hintDraft.value = '';
-      }
-    }
-    textarea.value = hintDraft.value;
-    if (playerLocked) {
-      textarea.readOnly = true;
-      textarea.classList.add('is-readonly');
-      if (submitButton) {
-        submitButton.disabled = true;
-      }
-      stopHintTypingImmediate({ notify: true });
-    } else {
-      form.addEventListener('submit', async evt => {
-        evt.preventDefault();
-        if (!textarea) return;
-        await simulateRandomClickAway(textarea);
-        const value = textarea.value.trim();
-        if (!value) {
-          showMessage('Clue cannot be empty.', 'error');
-          return;
-        }
-        hintDraft.roundId = roundIdentifier;
-        hintDraft.value = value;
-        stopHintTypingImmediate({ notify: true });
-        await submitHint(value);
-        hintDraft.syncedValue = value;
-        textarea.value = value;
-      });
-      if (textarea) {
-        textarea.addEventListener('input', () => {
-          hintDraft.roundId = roundIdentifier;
-          hintDraft.value = textarea.value;
-          markHintTypingActivity();
-        });
-        textarea.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
-      }
-    }
-    roundEl.appendChild(form);
-    restoreClueFocus(textarea, clueFocusState);
-    if (playerLocked) {
-      const notice = document.createElement('div');
-      notice.className = 'info-card subtle';
-      notice.textContent = 'Your hint is locked. Waiting for other hint givers.';
-      roundEl.appendChild(notice);
-    }
   }
 
   if (round.stage === 'round_result') {
