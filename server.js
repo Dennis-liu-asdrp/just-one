@@ -367,7 +367,6 @@ async function handleStartRound(req, res) {
       finishedAt: null,
       statsApplied: false,
       number: state.roundsCompleted + 1,
-      reviewLocks: new Set()
       reviewLocks: new Set(),
       typingHints: new Set()
     };
