@@ -50,17 +50,31 @@
 
     <section id="game-section" class="panel hidden">
       <div id="game-columns" class="game-columns">
-        <aside id="leaderboard-panel" class="leaderboard-panel hidden">
-          <div class="leaderboard-header">
-            <h3>Leaderboard</h3>
-            <p class="leaderboard-caption">Rewarding the hint heroes.</p>
+        <aside id="leaderboard-panel" class="leaderboard-column hidden">
+          <div class="leaderboard-panel">
+            <div class="leaderboard-header">
+              <h3>Leaderboard</h3>
+              <p class="leaderboard-caption">Rewarding the hint heroes.</p>
+            </div>
+            <div class="leaderboard-toggle" role="tablist">
+              <button type="button" data-view="room" class="leaderboard-tab active">Room</button>
+              <button type="button" data-view="global" class="leaderboard-tab">Global</button>
+            </div>
+            <ol id="leaderboard-list" class="leaderboard-list"></ol>
+            <section id="personal-stats" class="personal-stats"></section>
           </div>
-          <div class="leaderboard-toggle" role="tablist">
-            <button type="button" data-view="room" class="leaderboard-tab active">Room</button>
-            <button type="button" data-view="global" class="leaderboard-tab">Global</button>
-          </div>
-          <ol id="leaderboard-list" class="leaderboard-list"></ol>
-          <section id="personal-stats" class="personal-stats"></section>
+          <section id="hint-chat" class="hint-chat hidden" aria-label="Hint chat">
+            <header class="hint-chat-header">
+              <h3>Hint chat</h3>
+              <span id="hint-chat-status" class="hint-chat-status"></span>
+            </header>
+            <div id="hint-chat-messages" class="hint-chat-messages" role="log" aria-live="polite"></div>
+            <form id="hint-chat-form" class="hint-chat-form">
+              <label class="sr-only" for="hint-chat-input">Type your message</label>
+              <input id="hint-chat-input" type="text" maxlength="280" autocomplete="off" placeholder="Discuss collisions here…" />
+              <button type="submit">Send</button>
+            </form>
+          </section>
         </aside>
 
         <div id="game-main" class="game-main">
@@ -84,18 +98,6 @@
 
           <section id="players"></section>
           <section id="controls"></section>
-          <section id="hint-chat" class="hint-chat hidden" aria-label="Hint chat">
-            <header class="hint-chat-header">
-              <h3>Hint chat</h3>
-              <span id="hint-chat-status" class="hint-chat-status"></span>
-            </header>
-            <div id="hint-chat-messages" class="hint-chat-messages" role="log" aria-live="polite"></div>
-            <form id="hint-chat-form" class="hint-chat-form">
-              <label class="sr-only" for="hint-chat-input">Type your message</label>
-              <input id="hint-chat-input" type="text" maxlength="280" autocomplete="off" placeholder="Discuss collisions here…" />
-              <button type="submit">Send</button>
-            </form>
-          </section>
           <section id="round"></section>
         </div>
       </div>
