@@ -1344,7 +1344,7 @@ async function handleSettingsSubmit(event) {
   const totalRounds = Math.round(rawValue);
   const selectedDifficulty = difficultyInputs.find(input => input.checked)?.value === 'hard' ? 'hard' : 'easy';
   try {
-    const response = await apiPost('/api/game/settings', {
+    const response = await apiPost('/api/settings', {
       playerId: player.id,
       totalRounds,
       difficulty: selectedDifficulty
@@ -1381,7 +1381,7 @@ async function handleDifficultyChange(event) {
     return;
   }
   try {
-    const response = await apiPost('/api/game/settings', {
+    const response = await apiPost('/api/settings', {
       playerId: player.id,
       difficulty: value,
       totalRounds: currentSettings.totalRounds
