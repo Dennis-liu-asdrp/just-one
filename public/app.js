@@ -1025,10 +1025,8 @@ function renderLeaderboard() {
             <span>${escapeHtml(entry.name)}</span>
           </div>
           <div class="leaderboard-metrics">
-            ${renderLeaderboardMetric('🥇', 'Clue Usefulness Score', metrics.cus)}
-            ${renderLeaderboardMetric('💡', 'Hint Survival Rate', metrics.hsr)}
-            ${renderLeaderboardMetric('🎯', 'Guess Assist Rate', metrics.gar)}
-            ${renderLeaderboardMetric('🔁', 'Elimination Frequency', metrics.ef)}
+            ${renderLeaderboardMetric('🎯', 'Hint Survival Rate', metrics.hsr)}
+            ${renderLeaderboardMetric('💡', 'Hint Success Rate', metrics.gar)}
           </div>
         </div>
       `;
@@ -1056,10 +1054,8 @@ function renderLeaderboard() {
 
   const summaryHtml = `
     <div class="personal-summary">
-      ${buildStatChip('Clue Usefulness', `${formatMetricValue(metrics.cus)}%`)}
       ${buildStatChip('Hint Survival Rate', `${formatMetricValue(metrics.hsr)}%`)}
-      ${buildStatChip('Guess Assist Rate', `${formatMetricValue(metrics.gar)}%`)}
-      ${buildStatChip('Elimination Frequency', `${formatMetricValue(metrics.ef)}%`)}
+      ${buildStatChip('Hint Success Rate', `${formatMetricValue(metrics.gar)}%`)}
     </div>
   `;
 
