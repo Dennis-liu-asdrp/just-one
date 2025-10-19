@@ -550,6 +550,9 @@ function renderScore() {
   }
   const stage = serverState.round?.stage ?? 'waiting';
   stageIndicator.textContent = formatStage(stage);
+  if (player?.role === 'guesser' && (stage === 'collecting_hints' || stage === 'reviewing_hints')) {
+    stageIndicator.textContent = '';
+  }
   const { success, failure } = serverState.score;
   scoreboardEl.textContent = `Score: ${success} correct · ${failure} misses`;
 }
@@ -707,8 +710,8 @@ function renderControls() {
     case 'reviewing_hints':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
-      } else {
-        setControlsMessage('Hint givers are resolving collisions.');
+      } else if (player.role !== 'guesser') {
+        setControlsMessage('Hint givers are reviewing collisions.');
       }
       break;
     case 'awaiting_guess':
@@ -784,12 +787,12 @@ function renderRound() {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
 
     if (guesserWaiting) {
-      const message = document.createElement('div');
-      message.className = 'info-card subtle';
-      message.textContent = stage === 'reviewing_hints'
-        ? 'Hint givers are reviewing collisions. Hang tight!'
-        : 'Hint givers are preparing their clues.';
-      roundEl.appendChild(message);
+      if (stage === 'reviewing_hints') {
+        const message = document.createElement('div');
+        message.className = 'info-card subtle';
+        message.textContent = 'Hint givers are reviewing collisions.';
+        roundEl.appendChild(message);
+      }
     } else {
       const list = document.createElement('ul');
       list.className = 'hint-list';
@@ -861,14 +864,7 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
-  }
-  } else if (player.role === 'guesser' && stage !== 'round_result') {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'info-card subtle';
-    placeholder.textContent = stage === 'reviewing_hints'
-      ? 'Hint givers are reviewing clues before revealing them.'
-      : 'Waiting for hint givers to submit their clues.';
-    roundEl.appendChild(placeholder);
+    }
   }
 
   if (round.stage === 'collecting_hints' && player.role === 'hint') {
