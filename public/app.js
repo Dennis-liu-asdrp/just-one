@@ -47,6 +47,7 @@ const instructionsModalClose = document.getElementById('instructions-modal-close
 
 let leaderboardView = 'room';
 
+const imageAvatarExtensions = /\.(png|jpe?g|gif|webp|svg)$/i;
 const fallbackAvatars = [
   '🦊','🐼','🐸','🦄','🐝','🐢','🐧','🦁','🐙','🐨',
   '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
@@ -54,6 +55,7 @@ const fallbackAvatars = [
 ];
 const defaultAvatar = '🙂';
 const INSTRUCTIONS_STORAGE_KEY = 'just-one-instructions-seen';
+const fallbackAvatarOptions = fallbackAvatars.map(createAvatarDescriptor);
 
 let player = null;
 let serverState = null;
@@ -73,7 +75,7 @@ let currentSettings = {
   maxRounds: 20,
   difficulty: 'easy'
 };
-let availableAvatars = [...fallbackAvatars];
+let availableAvatarOptions = [];
 let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
 let hintChatAutoScroll = true;
@@ -337,22 +339,23 @@ function setupInstructions() {
 }
 
 function getAvailableAvatars() {
-  return Array.isArray(availableAvatars) && availableAvatars.length ? availableAvatars : fallbackAvatars;
+  return availableAvatarOptions.length ? availableAvatarOptions : fallbackAvatarOptions;
 }
 
 function normalizeAvatarChoice(value) {
-  const avatars = getAvailableAvatars();
   if (value === defaultAvatar) {
     return defaultAvatar;
   }
-  if (typeof value === 'string' && avatars.includes(value)) {
-    return value;
+  const sanitized = sanitizeAvatarValue(value);
+  const avatars = getAvailableAvatars();
+  if (sanitized && avatars.some(option => option.value === sanitized)) {
+    return sanitized;
   }
-  if (typeof value === 'string' && fallbackAvatars.includes(value)) {
-    const fallbackMatch = fallbackAvatars.find(avatar => avatars.includes(avatar));
-    if (fallbackMatch) return fallbackMatch;
+  const fallbackMatch = fallbackAvatarOptions.find(option => avatars.some(candidate => candidate.value === option.value));
+  if (fallbackMatch) {
+    return fallbackMatch.value;
   }
-  return avatars[0] || fallbackAvatars[0] || defaultAvatar;
+  return avatars[0]?.value || defaultAvatar;
 }
 
 function renderAvatarOptions() {
@@ -363,19 +366,39 @@ function renderAvatarOptions() {
   selectedAvatar = normalizeAvatarChoice(selectedAvatar);
   avatarOptionsContainer.innerHTML = '';
 
-  avatars.forEach(avatar => {
+  avatars.forEach(option => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'avatar-option';
-    button.dataset.avatar = avatar;
-    button.textContent = avatar;
+    if (option.asset) {
+      button.classList.add('avatar-option--image');
+    }
+    button.dataset.avatar = option.value;
     button.setAttribute('role', 'option');
-    button.setAttribute('aria-label', `Select avatar ${avatar}`);
-    button.setAttribute('aria-selected', avatar === selectedAvatar ? 'true' : 'false');
+    button.setAttribute('aria-label', `Select avatar ${option.label}`);
+    button.setAttribute('aria-selected', option.value === selectedAvatar ? 'true' : 'false');
     button.addEventListener('click', () => {
-      updateSelectedAvatar(avatar);
+      updateSelectedAvatar(option.value);
       closeAvatarModal();
     });
+
+    if (option.asset) {
+      const img = document.createElement('img');
+      img.src = option.asset;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.className = 'avatar-option-image';
+      button.appendChild(img);
+
+      const caption = document.createElement('span');
+      caption.className = 'avatar-option-label';
+      caption.textContent = option.label;
+      button.appendChild(caption);
+    } else {
+      button.textContent = option.value;
+    }
+
     avatarOptionsContainer.appendChild(button);
   });
 
@@ -405,20 +428,190 @@ function highlightSelectedAvatar() {
 function syncAvailableAvatarsFromServer() {
   if (!serverState) return;
   const serverList = Array.isArray(serverState.availableAvatars) ? serverState.availableAvatars : null;
-  if (!serverList || serverList.length === 0) return;
-  if (arraysEqual(serverList, availableAvatars)) return;
-  availableAvatars = [...serverList];
+  if (!serverList || serverList.length === 0) {
+    if (availableAvatarOptions.length) {
+      availableAvatarOptions = [];
+      selectedAvatar = normalizeAvatarChoice(selectedAvatar);
+      renderAvatarOptions();
+    }
+    return;
+  }
+
+  const normalized = serverList
+    .map(value => createAvatarDescriptor(value))
+    .filter(Boolean);
+
+  if (!normalized.length) {
+    if (availableAvatarOptions.length) {
+      availableAvatarOptions = [];
+      selectedAvatar = normalizeAvatarChoice(selectedAvatar);
+      renderAvatarOptions();
+    }
+    return;
+  }
+
+  const currentValues = availableAvatarOptions.map(option => option.value);
+  const nextValues = normalized.map(option => option.value);
+  if (arraysEqual(currentValues, nextValues)) return;
+
+  availableAvatarOptions = normalized;
+  selectedAvatar = normalizeAvatarChoice(selectedAvatar);
   renderAvatarOptions();
 }
 
 function updateAvatarPickerButton() {
   if (!avatarPickerCurrent) return;
-  const label = selectedAvatar === defaultAvatar
-    ? `${defaultAvatar} Guest`
-    : `${selectedAvatar} Avatar`;
-  avatarPickerCurrent.textContent = label;
-  if (avatarPickerButton) {
-    avatarPickerButton.title = `Current avatar: ${label}`;
+  const option = findAvatarOption(selectedAvatar);
+  avatarPickerCurrent.innerHTML = '';
+  avatarPickerCurrent.classList.toggle('avatar-picker-current--image', Boolean(option.asset));
+
+  if (option.asset) {
+    const preview = createAvatarElement('avatar-picker-thumb', option.value);
+    avatarPickerCurrent.appendChild(preview);
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'avatar-picker-label';
+    labelSpan.textContent = option.label;
+    avatarPickerCurrent.appendChild(labelSpan);
+
+    if (avatarPickerButton) {
+      avatarPickerButton.title = `Current avatar: ${option.label}`;
+    }
+  } else {
+    const labelText = selectedAvatar === defaultAvatar
+      ? `${defaultAvatar} Guest`
+      : `${selectedAvatar} Avatar`;
+    avatarPickerCurrent.textContent = labelText;
+    if (avatarPickerButton) {
+      avatarPickerButton.title = `Current avatar: ${labelText}`;
+    }
+  }
+}
+
+function sanitizeAvatarValue(value) {
+  if (value === defaultAvatar) return defaultAvatar;
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+  const withoutPrefix = withoutLeadingSlash.startsWith('avatars/')
+    ? withoutLeadingSlash.slice('avatars/'.length)
+    : withoutLeadingSlash;
+  return withoutPrefix;
+}
+
+function formatAvatarLabel(filename) {
+  const base = filename.replace(/\.[^.]+$/, '');
+  const pretty = base
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!pretty) return 'Avatar';
+  return pretty.replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function createAvatarDescriptor(value) {
+  if (value === defaultAvatar) {
+    return {
+      value: defaultAvatar,
+      label: `${defaultAvatar} Guest`,
+      type: 'emoji',
+      asset: null
+    };
+  }
+
+  const sanitized = sanitizeAvatarValue(value);
+  if (!sanitized) {
+    return {
+      value: defaultAvatar,
+      label: `${defaultAvatar} Guest`,
+      type: 'emoji',
+      asset: null
+    };
+  }
+
+  const isImage = imageAvatarExtensions.test(sanitized);
+  if (isImage) {
+    return {
+      value: sanitized,
+      label: formatAvatarLabel(sanitized),
+      type: 'image',
+      asset: `/avatars/${sanitized}`
+    };
+  }
+
+  const label = sanitized === defaultAvatar ? `${defaultAvatar} Guest` : sanitized;
+  return {
+    value: sanitized,
+    label,
+    type: 'emoji',
+    asset: null
+  };
+}
+
+function findAvatarOption(value) {
+  if (value === defaultAvatar) {
+    return createAvatarDescriptor(defaultAvatar);
+  }
+
+  const sanitized = sanitizeAvatarValue(value);
+  if (!sanitized) {
+    return createAvatarDescriptor(defaultAvatar);
+  }
+
+  const options = getAvailableAvatars();
+  const match = options.find(option => option.value === sanitized);
+  if (match) return match;
+
+  const fallbackMatch = fallbackAvatarOptions.find(option => option.value === sanitized);
+  if (fallbackMatch) return fallbackMatch;
+
+  return createAvatarDescriptor(sanitized);
+}
+
+function createAvatarElement(className, avatarValue, options = {}) {
+  const element = document.createElement('span');
+  if (className) {
+    element.className = className;
+  }
+  applyAvatarToElement(element, avatarValue, options);
+  return element;
+}
+
+function applyAvatarToElement(element, avatarValue, { includeLabel = false } = {}) {
+  if (!(element instanceof HTMLElement)) return;
+  const option = findAvatarOption(avatarValue);
+  const asset = option.asset;
+  const label = option.label;
+
+  element.innerHTML = '';
+  element.classList.toggle('has-image-avatar', Boolean(asset));
+
+  if (asset) {
+    const img = document.createElement('img');
+    img.src = asset;
+    img.alt = includeLabel ? '' : label;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    element.appendChild(img);
+
+    if (includeLabel) {
+      const textSpan = document.createElement('span');
+      textSpan.className = 'avatar-text-label';
+      textSpan.textContent = label;
+      element.appendChild(textSpan);
+      element.setAttribute('aria-label', label);
+    } else {
+      element.removeAttribute('aria-label');
+    }
+  } else {
+    const display = option.value || defaultAvatar;
+    element.textContent = includeLabel
+      ? (display === defaultAvatar ? `${defaultAvatar} Guest` : `${display} Avatar`)
+      : display;
+    if (includeLabel) {
+      element.removeAttribute('aria-label');
+    }
   }
 }
 
@@ -841,9 +1034,7 @@ function renderPlayerInfo() {
   const summary = document.createElement('div');
   summary.className = 'identity-summary';
 
-  const avatarEl = document.createElement('span');
-  avatarEl.className = 'identity-avatar';
-  avatarEl.textContent = player.avatar || defaultAvatar;
+  const avatarEl = createAvatarElement('identity-avatar', player.avatar || defaultAvatar);
   summary.appendChild(avatarEl);
 
   const nameEl = document.createElement('strong');
@@ -950,9 +1141,7 @@ function renderPlayerBadge(playerRecord, round = null) {
     pill.classList.add('is-ready');
   }
   
-  const avatarEl = document.createElement('span');
-  avatarEl.className = 'player-pill-avatar';
-  avatarEl.textContent = playerRecord.avatar || defaultAvatar;
+  const avatarEl = createAvatarElement('player-pill-avatar', playerRecord.avatar || defaultAvatar);
   pill.appendChild(avatarEl);
 
   const nameEl = document.createElement('span');
@@ -1366,12 +1555,11 @@ function renderLeaderboard() {
       }
       const metrics = entry.metrics || {};
       const scoreValue = formatMetricValue(metrics.playerScore ?? entry.playerScore);
-      const avatarSymbol = escapeHtml(entry.avatar || defaultAvatar);
       li.innerHTML = `
         <div class="leaderboard-rank">#${index + 1}</div>
         <div class="leaderboard-info">
           <div class="leaderboard-name">
-            <span class="leaderboard-avatar">${avatarSymbol}</span>
+            <span class="leaderboard-avatar"></span>
             <span>${escapeHtml(entry.name)}</span>
           </div>
           <div class="leaderboard-metrics">
@@ -1383,6 +1571,8 @@ function renderLeaderboard() {
         </div>
         <div class="leaderboard-score">${scoreValue}<span>PlayerScore</span></div>
       `;
+      const avatarEl = li.querySelector('.leaderboard-avatar');
+      applyAvatarToElement(avatarEl, entry.avatar || defaultAvatar);
       leaderboardList.appendChild(li);
     });
   }
@@ -1784,9 +1974,7 @@ function renderRound() {
         const row = document.createElement('div');
         row.className = 'hint-row';
 
-        const avatarEl = document.createElement('span');
-        avatarEl.className = 'hint-avatar';
-        avatarEl.textContent = hint.avatar || defaultAvatar;
+        const avatarEl = createAvatarElement('hint-avatar', hint.avatar || defaultAvatar);
         row.appendChild(avatarEl);
 
         const ownHint = hint.playerId === player.id;
@@ -2023,9 +2211,7 @@ function renderRound() {
     guessLine.appendChild(guessLabel);
 
     if (round.guess) {
-      const avatarEl = document.createElement('span');
-      avatarEl.className = 'guess-avatar';
-      avatarEl.textContent = round.guess.avatar || defaultAvatar;
+      const avatarEl = createAvatarElement('guess-avatar', round.guess.avatar || defaultAvatar);
       guessLine.appendChild(avatarEl);
 
       const nameEl = document.createElement('strong');
@@ -2121,7 +2307,7 @@ function renderHintChat() {
 
     const avatarEl = document.createElement('div');
     avatarEl.className = 'hint-chat-avatar';
-    avatarEl.textContent = message.avatar || '🙂';
+    applyAvatarToElement(avatarEl, message.avatar || defaultAvatar);
 
     const bubble = document.createElement('div');
     bubble.className = 'hint-chat-bubble';

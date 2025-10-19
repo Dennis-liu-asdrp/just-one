@@ -8,22 +8,61 @@ import words from './words.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, 'public');
+const avatarsDir = path.join(publicDir, 'avatars');
 
 const MAX_TOTAL_ROUNDS = 20;
 const DEFAULT_TOTAL_ROUNDS = 10;
-const allowedAvatars = Object.freeze([
+const avatarFilePattern = /\.(png|jpe?g|gif|webp|svg)$/i;
+const fallbackAvatars = Object.freeze([
   '🦊','🐼','🐸','🦄','🐝','🐢','🐧','🦁','🐙','🐨',
   '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
   '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
 ]);
 const defaultAvatar = '🙂';
+let allowedAvatars = Object.freeze([...fallbackAvatars]);
 const MAX_CHAT_HISTORY = 200;
 const MAX_CHAT_LENGTH = 280;
+
+await refreshAllowedAvatars();
 
 function normalizeAvatar(value) {
   if (typeof value !== 'string') return defaultAvatar;
   if (value === defaultAvatar) return defaultAvatar;
-  return allowedAvatars.includes(value) ? value : defaultAvatar;
+  const trimmed = value.trim();
+  if (!trimmed) return defaultAvatar;
+  const sanitized = sanitizeAvatarValue(trimmed);
+  if (sanitized === defaultAvatar) return defaultAvatar;
+  if (allowedAvatars.includes(sanitized)) return sanitized;
+  if (allowedAvatars.length > 0) return allowedAvatars[0];
+  return defaultAvatar;
+}
+
+function sanitizeAvatarValue(value) {
+  const withoutLeadingSlash = value.replace(/^\/+/, '');
+  return withoutLeadingSlash.startsWith('avatars/')
+    ? withoutLeadingSlash.slice('avatars/'.length)
+    : withoutLeadingSlash;
+}
+
+async function refreshAllowedAvatars() {
+  try {
+    const entries = await fs.readdir(avatarsDir, { withFileTypes: true });
+    const files = entries
+      .filter(entry => entry.isFile())
+      .map(entry => entry.name.trim())
+      .map(name => sanitizeAvatarValue(name))
+      .filter(name => Boolean(name) && avatarFilePattern.test(name))
+      .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+
+    allowedAvatars = files.length
+      ? Object.freeze(files)
+      : Object.freeze([...fallbackAvatars]);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') {
+      console.error('Failed to load avatars directory', err);
+    }
+    allowedAvatars = Object.freeze([...fallbackAvatars]);
+  }
 }
 
 const state = {
@@ -238,6 +277,9 @@ function getContentType(filePath) {
   if (filePath.endsWith('.json')) return 'application/json; charset=utf-8';
   if (filePath.endsWith('.svg')) return 'image/svg+xml';
   if (filePath.endsWith('.png')) return 'image/png';
+  if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) return 'image/jpeg';
+  if (filePath.endsWith('.gif')) return 'image/gif';
+  if (filePath.endsWith('.webp')) return 'image/webp';
   return 'text/plain; charset=utf-8';
 }
 

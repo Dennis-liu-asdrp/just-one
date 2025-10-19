@@ -359,9 +359,57 @@ label span {
   font-size: 1.02rem;
 }
 
+.avatar-picker-current--image {
+  gap: 12px;
+}
+
+.avatar-picker-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(56, 189, 248, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
+  overflow: hidden;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.avatar-picker-thumb.has-image-avatar {
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.45);
+}
+
+.avatar-picker-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-picker-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.has-image-avatar {
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.has-image-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .avatar-options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 12px;
   max-height: 280px;
   overflow-y: auto;
@@ -369,11 +417,13 @@ label span {
 
 .avatar-option {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 56px;
+  gap: 10px;
+  min-height: 112px;
   border-radius: 14px;
-  padding: 0;
+  padding: 12px;
   background: rgba(15, 23, 42, 0.45);
   border: 1px solid rgba(148, 163, 184, 0.28);
   color: var(--text-primary);
@@ -382,6 +432,24 @@ label span {
   box-shadow: none;
   filter: none;
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.avatar-option--image {
+  font-size: 0.9rem;
+}
+
+.avatar-option-image {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.4), 0 12px 24px rgba(56, 189, 248, 0.22);
+  object-fit: cover;
+}
+
+.avatar-option-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .avatar-option:hover {
@@ -741,6 +809,22 @@ label span {
   align-items: center;
   justify-content: center;
   font-size: 1.2rem;
+  overflow: hidden;
+}
+
+.guess-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(250, 204, 21, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.35);
+  font-size: 1.2rem;
+  line-height: 1;
+  margin-right: 8px;
+  overflow: hidden;
 }
 
 .hint-chat-bubble {
@@ -1105,6 +1189,7 @@ button.pulse {
   font-size: 1.4rem;
   line-height: 1;
   box-shadow: inset 0 0 0 1px rgba(76, 120, 255, 0.25);
+  overflow: hidden;
 }
 
 .leaderboard-metrics {
@@ -1289,6 +1374,7 @@ button.pulse {
   font-size: 1.9rem;
   line-height: 1;
   box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.4);
+  overflow: hidden;
 }
 
 .identity-role {
@@ -1361,8 +1447,17 @@ button.pulse {
 }
 
 .player-pill-avatar {
-  font-size: 1.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(124, 58, 237, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.28);
+  font-size: 1.3rem;
   line-height: 1;
+  overflow: hidden;
 }
 
 .player-pill-name {
@@ -1568,8 +1663,17 @@ button.pulse {
 }
 
 .hint-avatar {
-  font-size: 1.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(56, 189, 248, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.3);
+  font-size: 1.35rem;
   line-height: 1;
+  overflow: hidden;
 }
 
 .hint-text {

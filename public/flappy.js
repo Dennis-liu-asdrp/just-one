@@ -9,6 +9,9 @@ const PIPE_SEQUENCE = [
   260
 ];
 
+const IMAGE_AVATAR_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg)$/i;
+const DEFAULT_AVATAR = '🙂';
+
 const DEFAULT_OPTIONS = Object.freeze({
   width: 340,
   height: 400,
@@ -58,12 +61,54 @@ export class MiniFlappyGame {
     this.running = false;
     this.hasCrashed = false;
     this.backgroundGradient = null;
+    this.avatar = DEFAULT_AVATAR;
+    this.avatarImage = null;
+    this.avatarImageSrc = null;
 
     this.reset();
   }
 
   setAvatar(avatar) {
-    this.avatar = avatar;
+    const sanitized = sanitizeAvatarValue(avatar);
+    const isImage = Boolean(sanitized) && IMAGE_AVATAR_EXTENSIONS.test(sanitized);
+
+    if (isImage) {
+      const asset = sanitized.startsWith('/avatars/') ? sanitized : `/avatars/${sanitized}`;
+      if (asset === this.avatarImageSrc) {
+        this.avatar = sanitized;
+        return;
+      }
+
+      this.avatar = sanitized;
+      this.avatarImageSrc = asset;
+      this.avatarImage = new Image();
+      this.avatarImage.decoding = 'async';
+      this.avatarImage.src = asset;
+      this.avatarImage.onload = () => {
+        if (!this.running) {
+          this.drawFrame();
+        }
+      };
+      this.avatarImage.onerror = () => {
+        this.avatarImage = null;
+      };
+      if (!this.running) {
+        this.drawFrame();
+      }
+      return;
+    }
+
+    const nextAvatar = sanitized || DEFAULT_AVATAR;
+    if (this.avatar === nextAvatar && !this.avatarImage) {
+      return;
+    }
+
+    this.avatar = nextAvatar;
+    this.avatarImage = null;
+    this.avatarImageSrc = null;
+    if (!this.running) {
+      this.drawFrame();
+    }
   }
 
   reset(message = 'Press space or tap to start') {
@@ -97,7 +142,7 @@ export class MiniFlappyGame {
     this.hasCrashed = false;
     this.hasStarted = false;
     this.lastTimestamp = null;
-    this.avatar = this.getAvatar?.() ?? '🙂';
+    this.setAvatar(this.getAvatar?.() ?? DEFAULT_AVATAR);
     this.backgroundGradient = null;
 
     this.drawFrame();
@@ -296,12 +341,35 @@ export class MiniFlappyGame {
     ctx.arc(radius * 0.3, -radius * 0.25, radius * 0.18, 0, Math.PI * 2);
     ctx.fill();
 
-    const avatar = this.avatar || '🙂';
-    ctx.font = `${Math.floor(radius * 1.3)}px 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(avatar, 0, 0);
+    const avatarValue = this.avatar || DEFAULT_AVATAR;
+    if (this.avatarImage && this.avatarImage.complete && this.avatarImage.naturalWidth > 0) {
+      const size = radius * 2.1;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 1.05, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(this.avatarImage, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    } else {
+      ctx.font = `${Math.floor(radius * 1.3)}px 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const textAvatar = IMAGE_AVATAR_EXTENSIONS.test(avatarValue) ? DEFAULT_AVATAR : avatarValue;
+      ctx.fillText(textAvatar, 0, 0);
+    }
 
     ctx.restore();
   }
+}
+
+function sanitizeAvatarValue(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+  if (withoutLeadingSlash.startsWith('avatars/')) {
+    return withoutLeadingSlash.slice('avatars/'.length);
+  }
+  return withoutLeadingSlash;
 }
