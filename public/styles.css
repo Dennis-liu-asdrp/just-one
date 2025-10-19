@@ -984,15 +984,22 @@ button.pulse {
   color: var(--text-secondary);
 }
 
+.leaderboard-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
 .leaderboard-panel {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  background: linear-gradient(180deg, rgba(44, 91, 240, 0.12), rgba(44, 91, 240, 0.05));
+  color: var(--text-primary);
+  background: linear-gradient(180deg, rgba(44, 91, 240, 0.35), rgba(44, 91, 240, 0.18));
   border-radius: 16px;
   padding: 1.25rem;
-  border: 1px solid rgba(44, 91, 240, 0.18);
-  box-shadow: 0 12px 28px rgba(15, 35, 95, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  box-shadow: 0 12px 28px rgba(15, 35, 95, 0.18);
 }
 
 .leaderboard-header h3 {
@@ -1001,8 +1008,35 @@ button.pulse {
 
 .leaderboard-caption {
   margin: 0.35rem 0 0;
-  color: #3c4a8b;
+  color: rgba(248, 250, 252, 0.85);
   font-size: 0.9rem;
+}
+
+.leaderboard-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.leaderboard-tab {
+  background: rgba(44, 91, 240, 0.28);
+  color: var(--text-primary);
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  border-radius: 999px;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  transition: background 0.2s ease, color 0.2s ease, border 0.2s ease;
+}
+
+.leaderboard-tab:hover {
+  background: rgba(44, 91, 240, 0.4);
+  border-color: rgba(99, 102, 241, 0.6);
+}
+
+.leaderboard-tab.active {
+  background: #2c5bf0;
+  color: var(--text-primary);
+  border-color: #2c5bf0;
 }
 
 .leaderboard-list {
@@ -1018,20 +1052,22 @@ button.pulse {
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.75rem;
-  background: #fff;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 12px;
   padding: 0.75rem;
-  box-shadow: 0 8px 20px rgba(15, 35, 95, 0.12);
+  box-shadow: 0 8px 20px rgba(15, 35, 95, 0.18);
+  color: var(--text-primary);
 }
 
 .leaderboard-row.is-self {
-  border: 1px solid rgba(44, 91, 240, 0.55);
-  box-shadow: 0 12px 26px rgba(44, 91, 240, 0.28);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  box-shadow: 0 12px 26px rgba(56, 189, 248, 0.28);
 }
 
 .leaderboard-rank {
   font-weight: 700;
-  color: #2c5bf0;
+  color: var(--text-primary);
   width: 2rem;
   text-align: center;
 }
@@ -1066,7 +1102,7 @@ button.pulse {
   flex-wrap: wrap;
   gap: 0.45rem;
   font-size: 0.84rem;
-  color: #3c4a8b;
+  color: rgba(248, 250, 252, 0.8);
 }
 
 .leaderboard-metric strong {
@@ -1078,8 +1114,9 @@ button.pulse {
   gap: 0.9rem;
   padding: 1rem;
   border-radius: 12px;
-  background: rgba(44, 91, 240, 0.08);
-  border: 1px dashed rgba(44, 91, 240, 0.35);
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  color: var(--text-primary);
 }
 
 .personal-stats h4 {
@@ -1093,17 +1130,18 @@ button.pulse {
 }
 
 .personal-summary .stat-chip {
-  background: #fff;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 10px;
   padding: 0.6rem;
-  box-shadow: 0 6px 14px rgba(15, 35, 95, 0.12);
+  box-shadow: 0 6px 14px rgba(15, 35, 95, 0.18);
   display: grid;
   gap: 0.25rem;
 }
 
 .stat-chip span {
   font-size: 0.8rem;
-  color: #3c4a8b;
+  color: var(--text-secondary);
 }
 
 .personal-hints {
@@ -1124,21 +1162,22 @@ button.pulse {
 }
 
 .personal-hints li {
-  background: #fff;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 10px;
   padding: 0.65rem;
-  box-shadow: 0 6px 14px rgba(15, 35, 95, 0.1);
+  box-shadow: 0 6px 14px rgba(15, 35, 95, 0.18);
 }
 
 .personal-hints li .hint-meta {
   font-size: 0.75rem;
-  color: #5c6590;
+  color: var(--text-secondary);
   margin-top: 0.25rem;
 }
 
 .leaderboard-empty,
 .personal-empty {
-  color: #5c6590;
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
@@ -1147,7 +1186,7 @@ button.pulse {
   flex-wrap: wrap;
   gap: 0.45rem 0.9rem;
   font-size: 0.85rem;
-  color: #3c4a8b;
+  color: var(--text-secondary);
 }
 
 .personal-volume span {
@@ -1157,7 +1196,7 @@ button.pulse {
 }
 
 .personal-volume strong {
-  color: #1f2d60;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
@@ -1166,7 +1205,7 @@ button.pulse {
     grid-template-columns: 1fr;
   }
 
-  .leaderboard-panel {
+  .leaderboard-column {
     order: -1;
   }
 
