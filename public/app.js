@@ -701,14 +701,14 @@ function renderControls() {
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Review collisions', () => beginReview(), round.hints.length === 0));
       } else {
-        setControlsMessage('Hints are being prepared');
+        setControlsMessage('Hint team is submitting clues.');
       }
       break;
     case 'reviewing_hints':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
       } else if (player.role !== 'guesser') {
-        setControlsMessage('Collisions are being reviewed');
+        setControlsMessage('Hint team is resolving collisions.');
       }
       break;
     case 'awaiting_guess':
@@ -787,7 +787,7 @@ function renderRound() {
       if (stage === 'reviewing_hints') {
         const message = document.createElement('div');
         message.className = 'info-card subtle';
-        message.textContent = 'Collisions are being reviewed';
+        message.textContent = 'Hint team is wrapping up their review.';
         roundEl.appendChild(message);
       }
     } else {
@@ -1000,11 +1000,11 @@ function buildButton(label, handler, disabled = false) {
 function formatStage(stage) {
   switch (stage) {
     case 'collecting_hints':
-      return 'Hints are being prepared';
+      return 'Collecting hints';
     case 'reviewing_hints':
-      return 'Collisions are being reviewed';
+      return 'Reviewing collisions';
     case 'awaiting_guess':
-      return 'Awaiting guess';
+      return 'Guess in progress';
     case 'round_result':
       return 'Round result';
     default:
