@@ -38,6 +38,10 @@ const hintChatMessages = document.getElementById('hint-chat-messages');
 const hintChatForm = document.getElementById('hint-chat-form');
 const hintChatInput = document.getElementById('hint-chat-input');
 const hintChatStatus = document.getElementById('hint-chat-status');
+const instructionsButton = document.getElementById('instructions-button');
+const instructionsModal = document.getElementById('instructions-modal');
+const instructionsModalClose = document.getElementById('instructions-modal-close');
+
 
 let leaderboardView = 'room';
 
@@ -47,6 +51,7 @@ const fallbackAvatars = [
   '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
 ];
 const defaultAvatar = '🙂';
+const INSTRUCTIONS_STORAGE_KEY = 'just-one-instructions-seen';
 
 let player = null;
 let serverState = null;
@@ -71,6 +76,14 @@ let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
 let hintChatAutoScroll = true;
 let lastRenderedChatRoundId = null;
+let instructionsModalOpen = false;
+let shouldAutoOpenInstructions = !hasSeenInstructionsBefore();
+const HINT_TYPING_IDLE_DELAY = 1800;
+const hintTypingState = {
+  active: false,
+  reported: false,
+  timeoutId: null
+};
 
 init();
 
@@ -95,11 +108,13 @@ function init() {
   setupSettings();
   setupAvatarPicker();
   setupHintChat();
+  setupInstructions();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
   setupButtonFeedback();
+  maybeAutoOpenInstructions();
   renderSettingsButtonState();
 }
 
@@ -143,6 +158,31 @@ function setupHintChat() {
 
   if (hintChatForm) {
     hintChatForm.addEventListener('submit', handleHintChatSubmit);
+  }
+}
+function setupInstructions() {
+  if (!instructionsButton || !instructionsModal) {
+    shouldAutoOpenInstructions = false;
+    return;
+  }
+  instructionsButton.title = 'How to play';
+  instructionsButton.addEventListener('click', () => {
+    if (instructionsModalOpen) {
+      closeInstructionsModal();
+    } else {
+      openInstructionsModal();
+    }
+  });
+
+  instructionsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'instructions-modal') {
+      closeInstructionsModal();
+    }
+  });
+
+  if (instructionsModalClose) {
+    instructionsModalClose.addEventListener('click', () => closeInstructionsModal());
   }
 }
 
@@ -279,6 +319,74 @@ function handleAvatarModalKeydown(event) {
   }
 }
 
+function openInstructionsModal() {
+  if (!instructionsModal || instructionsModalOpen) return;
+  instructionsModal.classList.remove('hidden');
+  instructionsModal.classList.remove('is-hiding');
+  window.requestAnimationFrame(() => {
+    instructionsModal.classList.add('is-visible');
+  });
+  instructionsModalOpen = true;
+  shouldAutoOpenInstructions = false;
+  if (instructionsButton) {
+    instructionsButton.setAttribute('aria-expanded', 'true');
+  }
+  document.addEventListener('keydown', handleInstructionsKeydown);
+  if (instructionsModalClose) {
+    instructionsModalClose.focus({ preventScroll: true });
+  }
+}
+
+function closeInstructionsModal(force = false) {
+  if (!instructionsModal) return;
+  if (!instructionsModalOpen && !force) return;
+
+  if (force && !instructionsModalOpen) {
+    instructionsModal.classList.add('hidden');
+    instructionsModal.classList.remove('is-visible');
+    instructionsModal.classList.remove('is-hiding');
+    return;
+  }
+
+  instructionsModal.classList.remove('is-visible');
+  if (force) {
+    instructionsModal.classList.add('hidden');
+    instructionsModal.classList.remove('is-hiding');
+  } else {
+    instructionsModal.classList.add('is-hiding');
+    window.setTimeout(() => {
+      if (!instructionsModalOpen) {
+        instructionsModal.classList.add('hidden');
+        instructionsModal.classList.remove('is-hiding');
+      }
+    }, 220);
+  }
+  instructionsModalOpen = false;
+  shouldAutoOpenInstructions = false;
+  markInstructionsSeen();
+  if (instructionsButton) {
+    instructionsButton.setAttribute('aria-expanded', 'false');
+    if (!force) {
+      instructionsButton.focus({ preventScroll: true });
+    }
+  }
+  document.removeEventListener('keydown', handleInstructionsKeydown);
+}
+
+function handleInstructionsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeInstructionsModal();
+  }
+}
+
+function maybeAutoOpenInstructions() {
+  if (!shouldAutoOpenInstructions) return;
+  if (instructionsModalOpen) return;
+  if (player) return;
+
+  openInstructionsModal();
+}
 function setupSettings() {
   if (!settingsButton || !settingsModal) return;
   settingsButton.addEventListener('click', () => {
@@ -384,6 +492,16 @@ function onStateChange() {
   const round = serverState?.round;
   const roundId = round?.id ?? null;
   const stage = round?.stage ?? null;
+
+  if (player?.role === 'hint') {
+    const reviewLocks = Array.isArray(round?.reviewLocks) ? round.reviewLocks : [];
+    const playerLocked = reviewLocks.includes(player.id);
+    if (!round || stage !== 'collecting_hints' || playerLocked) {
+      stopHintTypingImmediate({ notify: true });
+    }
+  } else {
+    stopHintTypingImmediate({ notify: true });
+  }
 
   if (player && serverState && !serverState.players.some(p => p.id === player.id)) {
     player = null;
@@ -517,6 +635,7 @@ function updateLayout() {
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
     renderLeaderboard();
+    maybeAutoOpenInstructions();
     renderRoundProgress();
     renderEndGameControls();
     renderSettingsButtonState();
@@ -640,7 +759,7 @@ function renderPlayers() {
       container.appendChild(empty);
     } else {
       group.players.forEach(record => {
-        container.appendChild(renderPlayerBadge(record));
+        container.appendChild(renderPlayerBadge(record, serverState.round));
       });
     }
 
@@ -648,7 +767,7 @@ function renderPlayers() {
   }
 }
 
-function renderPlayerBadge(playerRecord) {
+function renderPlayerBadge(playerRecord, round = null) {
   const pill = document.createElement('span');
   pill.className = 'player-pill';
   if (player && player.id === playerRecord.id) {
@@ -656,6 +775,13 @@ function renderPlayerBadge(playerRecord) {
   }
   const voted = Boolean(playerRecord?.votedToEnd);
   if (voted) pill.classList.add('has-voted');
+
+  const reviewLocks = Array.isArray(round?.reviewLocks) ? round.reviewLocks : [];
+  const typingHints = Array.isArray(round?.typingHints) ? round.typingHints : [];
+  const isReady = reviewLocks.includes(playerRecord.id);
+  if (isReady && playerRecord.role === 'hint') {
+    pill.classList.add('is-ready');
+  }
   
   const avatarEl = document.createElement('span');
   avatarEl.className = 'player-pill-avatar';
@@ -674,7 +800,77 @@ function renderPlayerBadge(playerRecord) {
     pill.appendChild(indicator);
   }
 
+  const showTyping = Boolean(
+    round &&
+    playerRecord.role === 'hint' &&
+    round.stage === 'collecting_hints' &&
+    typingHints.includes(playerRecord.id) &&
+    !reviewLocks.includes(playerRecord.id)
+  );
+
+  if (showTyping) {
+    pill.appendChild(buildTypingIndicator());
+  }
+
   return pill;
+}
+
+function buildTypingIndicator() {
+  const bubble = document.createElement('span');
+  bubble.className = 'typing-indicator';
+  bubble.setAttribute('role', 'status');
+  bubble.setAttribute('aria-live', 'polite');
+  for (let index = 0; index < 3; index += 1) {
+    const dot = document.createElement('span');
+    dot.className = 'typing-dot';
+    dot.style.animationDelay = `${index * 0.2}s`;
+    bubble.appendChild(dot);
+  }
+  return bubble;
+}
+
+function markHintTypingActivity() {
+  if (!player || player.role !== 'hint') return;
+  const round = serverState?.round;
+  if (!round || round.stage !== 'collecting_hints') return;
+  if (hintTypingState.timeoutId) {
+    window.clearTimeout(hintTypingState.timeoutId);
+    hintTypingState.timeoutId = null;
+  }
+  const wasActive = hintTypingState.active;
+  hintTypingState.active = true;
+  hintTypingState.timeoutId = window.setTimeout(() => {
+    hintTypingState.timeoutId = null;
+    hintTypingState.active = false;
+    void sendHintTypingState(false);
+  }, HINT_TYPING_IDLE_DELAY);
+  if (!wasActive || hintTypingState.reported !== true) {
+    void sendHintTypingState(true);
+  }
+}
+
+function stopHintTypingImmediate({ notify = false } = {}) {
+  if (hintTypingState.timeoutId) {
+    window.clearTimeout(hintTypingState.timeoutId);
+    hintTypingState.timeoutId = null;
+  }
+  const shouldNotify = notify || hintTypingState.active || hintTypingState.reported === true;
+  hintTypingState.active = false;
+  if (shouldNotify) {
+    void sendHintTypingState(false);
+  }
+}
+
+async function sendHintTypingState(active) {
+  if (!player) return;
+  if (!serverState?.round) return;
+  if (hintTypingState.reported === active) return;
+  try {
+    await apiPost('/api/hints/typing', { playerId: player.id, typing: active }, { silent: true });
+    hintTypingState.reported = active;
+  } catch (err) {
+    hintTypingState.reported = null;
+  }
 }
 
 function renderScore() {
@@ -926,16 +1122,24 @@ function renderControls() {
   switch (round.stage) {
     case 'collecting_hints':
       if (player.role === 'hint') {
-        controlsEl.appendChild(buildButton('Review collisions', () => beginReview(), round.hints.length === 0));
+        const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
+        const playerLocked = reviewLocks.includes(player.id);
+        const playerHint = round.hints.find(h => h.playerId === player.id);
+        if (playerLocked) {
+          setControlsMessage('Hint locked. Waiting for other hint givers to review collisions.');
+        } else {
+          const button = buildButton('Review collisions', () => beginReview(), !playerHint);
+          controlsEl.appendChild(button);
+        }
       } else {
-        setControlsMessage('Hints are being prepared.');
+        setControlsMessage('Hint team is submitting clues.');
       }
       break;
     case 'reviewing_hints':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
       } else {
-        setControlsMessage('Hint givers are resolving collisions.');
+        setControlsMessage('Hint team is resolving collisions.');
       }
       break;
     case 'awaiting_guess':
@@ -961,8 +1165,10 @@ function renderControls() {
           form.reset();
         });
         controlsEl.appendChild(form);
-      } else {
+      } else if (player.role !== 'hint') {
         setControlsMessage('Waiting for the guesser to decide.');
+      } else {
+        controlsEl.innerHTML = '';
       }
       break;
     case 'round_result': {
@@ -1013,6 +1219,12 @@ function renderRound() {
   }
 
   const stage = round.stage;
+  const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
+  const playerLocked = player.role === 'hint' && reviewLocks.includes(player.id);
+
+  if (player.role === 'hint' && (playerLocked || stage !== 'collecting_hints')) {
+    stopHintTypingImmediate({ notify: true });
+  }
 
   if (round.hints.length > 0) {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
@@ -1028,7 +1240,8 @@ function renderRound() {
       const list = document.createElement('ul');
       list.className = 'hint-list';
 
-      const canSeeText = player.role === 'hint'
+      const hintPlayerCanSeeText = player.role === 'hint' && stage !== 'collecting_hints';
+      const canSeeText = hintPlayerCanSeeText
         || stage === 'round_result'
         || (player.role === 'guesser' && stage === 'awaiting_guess');
 
@@ -1129,7 +1342,7 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
-  }
+    }
   } else if (player.role === 'guesser' && stage !== 'round_result') {
     const placeholder = document.createElement('div');
     placeholder.className = 'info-card subtle';
@@ -1151,19 +1364,38 @@ function renderRound() {
       <button type="submit">Submit clue</button>
     `;
     const textarea = form.querySelector('textarea');
+    const submitButton = form.querySelector('button[type="submit"]');
     if (existing) {
       textarea.value = existing.text;
     }
-    form.addEventListener('submit', async evt => {
-      evt.preventDefault();
-      const value = textarea.value.trim();
-      if (!value) {
-        showMessage('Clue cannot be empty.', 'error');
-        return;
+    if (playerLocked) {
+      textarea.readOnly = true;
+      textarea.classList.add('is-readonly');
+      if (submitButton) {
+        submitButton.disabled = true;
       }
-      await submitHint(value);
-    });
+      stopHintTypingImmediate({ notify: true });
+    } else {
+      form.addEventListener('submit', async evt => {
+        evt.preventDefault();
+        const value = textarea.value.trim();
+        if (!value) {
+          showMessage('Clue cannot be empty.', 'error');
+          return;
+        }
+        stopHintTypingImmediate({ notify: true });
+        await submitHint(value);
+      });
+      textarea.addEventListener('input', () => markHintTypingActivity());
+      textarea.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
+    }
     roundEl.appendChild(form);
+    if (playerLocked) {
+      const notice = document.createElement('div');
+      notice.className = 'info-card subtle';
+      notice.textContent = 'Your hint is locked. Waiting for other hint givers.';
+      roundEl.appendChild(notice);
+    }
   }
 
   if (round.stage === 'round_result') {
@@ -1339,7 +1571,13 @@ async function startRound() {
 async function beginReview() {
   if (!player) return;
   try {
-    await apiPost('/api/round/begin-review', { playerId: player.id });
+    const result = await apiPost('/api/round/begin-review', { playerId: player.id });
+    stopHintTypingImmediate({ notify: true });
+    if (result?.readyToReview) {
+      showMessage('All hint givers are now reviewing collisions.');
+    } else if (!result?.alreadyLocked) {
+      showMessage('Hint locked. Waiting for other hint givers.');
+    }
   } catch (err) {}
 }
 
@@ -1405,13 +1643,13 @@ function buildButton(label, handler, disabled = false) {
 function formatStage(stage) {
   switch (stage) {
     case 'collecting_hints':
-      return 'Stage: Collecting hints';
+      return 'Collecting hints';
     case 'reviewing_hints':
-      return 'Stage: Reviewing collisions';
+      return 'Reviewing collisions';
     case 'awaiting_guess':
-      return 'Stage: Awaiting guess';
+      return 'Guess in progress';
     case 'round_result':
-      return 'Stage: Round result';
+      return 'Round result';
     default:
       return 'Waiting to start';
   }
@@ -1961,11 +2199,27 @@ function arraysEqual(a, b) {
 }
 
 function escapeHtml(value) {
-  const str = String(value ?? '')
+  const str = String(value ?? '');
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function markInstructionsSeen() {
+  try {
+    localStorage.setItem(INSTRUCTIONS_STORAGE_KEY, 'true');
+  } catch (err) {
+    // Ignore storage errors (private mode, etc.).
+  }
+}
+
+function hasSeenInstructionsBefore() {
+  try {
+    return localStorage.getItem(INSTRUCTIONS_STORAGE_KEY) === 'true';
+  } catch (err) {
+    return false;
+  }
 }

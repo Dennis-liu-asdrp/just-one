@@ -13,6 +13,11 @@
   <main>
     <h1>Just One</h1>
 
+    <button type="button" id="instructions-button" class="instructions-button" aria-haspopup="dialog" aria-expanded="false">
+      <span class="instructions-icon" aria-hidden="true">?</span>
+      <span class="sr-only">How to play</span>
+    </button>
+
     <section id="join-section" class="panel">
       <h2>Join the table</h2>
       <form id="join-form">
@@ -165,6 +170,26 @@
         <h3 id="avatar-modal-title">Choose your avatar</h3>
         <p class="avatar-modal-subtitle">Pick an icon to represent you at the table.</p>
         <div id="avatar-options" class="avatar-options" role="listbox" aria-label="Avatar options"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="instructions-modal" class="info-modal hidden" role="dialog" aria-modal="true" aria-labelledby="instructions-modal-title">
+    <div class="info-modal-backdrop" data-dismiss="instructions-modal"></div>
+    <div class="info-modal-panel" role="document">
+      <button type="button" id="instructions-modal-close" class="info-modal-close" aria-label="Close instructions" data-dismiss="instructions-modal">×</button>
+      <div class="info-modal-body">
+        <h3 id="instructions-modal-title">How to play Just One</h3>
+        <p class="info-modal-lead">Team up to help the guesser find the secret word using unique clues.</p>
+        <ol class="info-modal-list">
+          <li><strong>Join the table.</strong> Choose a name, select <em>Guesser</em> or <em>Hint giver</em>, then tap <em>Join</em>.</li>
+          <li><strong>Start a round.</strong> A hint giver starts once the room has at least one guesser and one hint giver.</li>
+          <li><strong>Write one clue.</strong> Hint givers see the word and submit a single-word clue. Proper nouns or multi-word clues are blocked in hard mode.</li>
+          <li><strong>Remove duplicates.</strong> Hint givers compare their clues and eliminate any duplicates or collisions before revealing them. A collision happens when one clue <strong>is a</strong> direct description of another (for example, if the clue is "actor", then "person" is not allowed because an actor <strong>is a</strong> person; "Ryan Reynolds" is not allowed because he <strong>is a</strong> actor). Hint givers talk it out and remove similar or related words before the clues are shown.</li>
+          <li><strong>Make the guess.</strong> The guesser sees the remaining clues and submits an answer. Everyone wins or loses together.</li>
+          <li><strong>Keep playing.</strong> Start the next round right away or adjust settings between rounds for a new challenge.</li>
+        </ol>
+        <p class="info-modal-footer">Need a refresher later? Click the question mark icon any time.</p>
       </div>
     </div>
   </div>
