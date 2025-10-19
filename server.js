@@ -1399,13 +1399,10 @@ function buildLeaderboard() {
   if (allStats.length === 0) {
     return {
       global: [],
-      room: [],
       byPlayer: {},
       updatedAt: Date.now()
     };
   }
-
-  const roomHintGiverIds = new Set(state.players.filter(p => p.role === 'hint').map(p => p.id));
 
   const entries = allStats.map(stats => {
     const metrics = calculateMetrics(stats);
@@ -1437,7 +1434,6 @@ function buildLeaderboard() {
   const rankedEntries = entries.filter(entry => entry.totals.hintsGiven > 0);
 
   const global = sortEntries(rankedEntries.slice());
-  const room = sortEntries(rankedEntries.filter(entry => roomHintGiverIds.has(entry.playerId)));
 
   const byPlayer = {};
   for (const entry of entries) {
@@ -1446,7 +1442,6 @@ function buildLeaderboard() {
 
   return {
     global,
-    room,
     byPlayer,
     updatedAt: Date.now()
   };

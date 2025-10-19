@@ -26,7 +26,6 @@ const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
 const personalStatsSection = document.getElementById('personal-stats');
-const leaderboardTabs = leaderboardPanel ? Array.from(leaderboardPanel.querySelectorAll('.leaderboard-tab')) : [];
 const avatarOptionsContainer = document.getElementById('avatar-options');
 const avatarInput = document.getElementById('avatar-input');
 const avatarPickerButton = document.getElementById('avatar-picker-button');
@@ -43,7 +42,6 @@ const instructionsModal = document.getElementById('instructions-modal');
 const instructionsModalClose = document.getElementById('instructions-modal-close');
 
 
-let leaderboardView = 'room';
 
 const fallbackAvatars = [
   '🦊','🐼','🐸','🦄','🐝','🐢','🐧','🦁','🐙','🐨',
@@ -90,15 +88,6 @@ init();
 function init() {
   joinForm.addEventListener('submit', handleJoinSubmit);
   window.addEventListener('beforeunload', handleBeforeUnload);
-  leaderboardTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      const view = tab.dataset.view === 'global' ? 'global' : 'room';
-      if (view === leaderboardView) return;
-      leaderboardView = view;
-      leaderboardTabs.forEach(btn => btn.classList.toggle('active', btn === tab));
-      renderLeaderboard();
-    });
-  });
   if (endGameButton) {
     endGameButton.addEventListener('click', handleEndGameToggle);
   }
@@ -970,14 +959,6 @@ function renderLeaderboard() {
   const board = serverState?.leaderboard ?? null;
 
   if (!player || !board) {
-    if (!player) {
-      leaderboardView = 'room';
-      if (leaderboardTabs.length) {
-        leaderboardTabs.forEach(tab => {
-          tab.classList.toggle('active', tab.dataset.view === leaderboardView);
-        });
-      }
-    }
     leaderboardPanel.classList.add('hidden');
     gameColumns.classList.add('single-column');
     leaderboardList.innerHTML = '';
@@ -990,23 +971,13 @@ function renderLeaderboard() {
   leaderboardPanel.classList.remove('hidden');
   gameColumns.classList.remove('single-column');
 
-  if (leaderboardTabs.length) {
-    leaderboardTabs.forEach(tab => {
-      const isActive = tab.dataset.view === leaderboardView;
-      tab.classList.toggle('active', isActive);
-    });
-  }
-
-  const viewKey = leaderboardView === 'global' ? 'global' : 'room';
-  const entries = Array.isArray(board[viewKey]) ? board[viewKey] : [];
+  const entries = Array.isArray(board.global) ? board.global : [];
   leaderboardList.innerHTML = '';
 
   if (entries.length === 0) {
     const li = document.createElement('li');
     li.className = 'leaderboard-empty';
-    li.textContent = viewKey === 'room'
-      ? 'No hint data in this room yet — keep those clues coming.'
-      : 'No global hint history yet.';
+    li.textContent = 'No hint data yet — keep those clues coming.';
     leaderboardList.appendChild(li);
   } else {
     entries.slice(0, 10).forEach((entry, index) => {
@@ -1025,8 +996,10 @@ function renderLeaderboard() {
             <span>${escapeHtml(entry.name)}</span>
           </div>
           <div class="leaderboard-metrics">
-            ${renderLeaderboardMetric('🎯', 'Hint Survival Rate', metrics.hsr)}
-            ${renderLeaderboardMetric('💡', 'Hint Success Rate', metrics.gar)}
+            ${renderLeaderboardMetric('🥇', 'Clue Usefulness Score', metrics.cus)}
+            ${renderLeaderboardMetric('💡', 'Hint Survival Rate', metrics.hsr)}
+            ${renderLeaderboardMetric('🎯', 'Guess Assist Rate', metrics.gar)}
+            ${renderLeaderboardMetric('🔁', 'Elimination Frequency', metrics.ef)}
           </div>
         </div>
       `;
