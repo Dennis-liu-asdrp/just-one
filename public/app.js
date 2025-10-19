@@ -550,9 +550,6 @@ function renderScore() {
   }
   const stage = serverState.round?.stage ?? 'waiting';
   stageIndicator.textContent = formatStage(stage);
-  if (player?.role === 'guesser' && (stage === 'collecting_hints' || stage === 'reviewing_hints')) {
-    stageIndicator.textContent = '';
-  }
   const { success, failure } = serverState.score;
   scoreboardEl.textContent = `Score: ${success} correct · ${failure} misses`;
 }
@@ -711,7 +708,7 @@ function renderControls() {
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
       } else if (player.role !== 'guesser') {
-        setControlsMessage('Hint givers are reviewing collisions.');
+        setControlsMessage('Collisions are being reviewed.');
       }
       break;
     case 'awaiting_guess':
@@ -790,7 +787,7 @@ function renderRound() {
       if (stage === 'reviewing_hints') {
         const message = document.createElement('div');
         message.className = 'info-card subtle';
-        message.textContent = 'Hint givers are reviewing collisions.';
+        message.textContent = 'Collisions are being reviewed.';
         roundEl.appendChild(message);
       }
     } else {
@@ -1003,9 +1000,9 @@ function buildButton(label, handler, disabled = false) {
 function formatStage(stage) {
   switch (stage) {
     case 'collecting_hints':
-      return 'Stage: Collecting hints';
+      return 'Hints are being prepared.';
     case 'reviewing_hints':
-      return 'Stage: Reviewing collisions';
+      return 'Collisions are being reviewed.';
     case 'awaiting_guess':
       return 'Stage: Awaiting guess';
     case 'round_result':
