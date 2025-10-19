@@ -134,7 +134,7 @@ function init() {
   renderSettingsButtonState();
 }
 
-function simulateRandomClickAway(excludeElement) {
+async function simulateRandomClickAway(excludeElement) {
   if (typeof document === 'undefined' || !document.body) return;
   const viewportWidth = window.innerWidth || document.documentElement?.clientWidth;
   const viewportHeight = window.innerHeight || document.documentElement?.clientHeight;
@@ -144,38 +144,35 @@ function simulateRandomClickAway(excludeElement) {
     ? excludeElement.getBoundingClientRect()
     : null;
   const attempts = 12;
+
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const clientX = Math.random() * viewportWidth;
     const clientY = Math.random() * viewportHeight;
     if (rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
       continue;
     }
-    dispatchSyntheticClick(Math.round(clientX), Math.round(clientY));
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target || target === excludeElement || (excludeElement && excludeElement.contains(target))) {
+      continue;
+    }
+    await dispatchSyntheticClick(target, Math.round(clientX), Math.round(clientY));
     return;
   }
+
   if (excludeElement && typeof excludeElement.blur === 'function') {
     excludeElement.blur();
   }
+  await new Promise(resolve => requestAnimationFrame(resolve));
 
-  function dispatchSyntheticClick(clientX, clientY) {
-    const spot = document.createElement('div');
-    spot.dataset.randomClickHelper = 'true';
-    spot.style.position = 'fixed';
-    spot.style.left = `${clientX}px`;
-    spot.style.top = `${clientY}px`;
-    spot.style.width = '1px';
-    spot.style.height = '1px';
-    spot.style.zIndex = '2147483647';
-    spot.style.pointerEvents = 'auto';
-    document.body.appendChild(spot);
-
+  async function dispatchSyntheticClick(target, clientX, clientY) {
     const baseEventInit = {
       bubbles: true,
       cancelable: true,
       clientX,
       clientY,
       screenX: (window.screenX || 0) + clientX,
-      screenY: (window.screenY || 0) + clientY
+      screenY: (window.screenY || 0) + clientY,
+      button: 0
     };
 
     if (typeof PointerEvent === 'function') {
@@ -185,24 +182,25 @@ function simulateRandomClickAway(excludeElement) {
         pointerType: 'mouse',
         isPrimary: true
       });
+      target.dispatchEvent(pointerDown);
       const pointerUp = new PointerEvent('pointerup', {
         ...baseEventInit,
         pointerId: 1,
         pointerType: 'mouse',
         isPrimary: true
       });
-      spot.dispatchEvent(pointerDown);
-      spot.dispatchEvent(pointerUp);
+      target.dispatchEvent(pointerUp);
     } else {
       const mouseDown = new MouseEvent('mousedown', baseEventInit);
+      target.dispatchEvent(mouseDown);
       const mouseUp = new MouseEvent('mouseup', baseEventInit);
-      spot.dispatchEvent(mouseDown);
-      spot.dispatchEvent(mouseUp);
+      target.dispatchEvent(mouseUp);
     }
 
     const click = new MouseEvent('click', baseEventInit);
-    spot.dispatchEvent(click);
-    spot.remove();
+    target.dispatchEvent(click);
+
+    await new Promise(resolve => requestAnimationFrame(resolve));
   }
 }
 
@@ -1602,7 +1600,7 @@ function renderRound() {
       form.addEventListener('submit', async evt => {
         evt.preventDefault();
         if (!textarea) return;
-        simulateRandomClickAway(textarea);
+        await simulateRandomClickAway(textarea);
         const value = textarea.value.trim();
         if (!value) {
           showMessage('Clue cannot be empty.', 'error');
