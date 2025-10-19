@@ -8,8 +8,6 @@
 </head>
 <body>
   <main>
-    <h1 class="landing-title">Just One</h1>
-
     <section id="join-section" class="panel">
       <h2>Join the table</h2>
       <form id="join-form">
@@ -42,18 +40,13 @@
       <div class="app-body">
         <aside class="sidebar">
           <div class="panel leaderboard" id="leaderboard-panel">leaderboard</div>
-          <section id="share-panel" class="panel share-panel subtle hidden">
-            <h3>Invite others</h3>
-            <div class="share-row">
-              <input id="share-link" type="text" readonly />
-              <button type="button" id="copy-share" class="btn btn-secondary">Copy</button>
-            </div>
-            <p class="hint" id="share-hint">Share this address with friends on your network.</p>
-          </section>
         </aside>
 
         <main class="board panel">
-          <div id="player-info" class="player-info"></div>
+          <div class="board-header">
+            <div id="player-info" class="player-info"></div>
+            <div id="controls-inline" class="controls-inline"></div>
+          </div>
 
           <div class="board-row">
             <section id="players" class="players-block">
@@ -73,9 +66,7 @@
             <div id="round" class="round-content"></div>
           </section>
 
-          <div class="board-actions">
-            <div id="controls-inline" class="controls-inline"></div>
-            <div class="spacer"></div>
+          <div class="board-footer">
             <div class="controls-bottom">
               <button id="leave-btn" type="button" class="btn btn-secondary">leave table</button>
               <button id="end-btn" type="button" class="btn btn-secondary">end game</button>
@@ -84,6 +75,12 @@
 
           <section id="controls" class="controls-legacy" aria-hidden="true"></section>
         </main>
+      </div>
+
+      <div id="share-panel" class="share-support hidden">
+        <input id="share-link" type="text" readonly />
+        <button type="button" id="copy-share"></button>
+        <p id="share-hint"></p>
       </div>
 
       <div id="messages"></div>

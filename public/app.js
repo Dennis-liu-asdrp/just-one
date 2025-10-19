@@ -240,7 +240,9 @@ function renderSharePanel() {
     shareHint.textContent = 'Share this address with friends so they can join the same table.';
   }
 
-  sharePanel.classList.remove('hidden');
+  if (sharePanel) {
+    sharePanel.classList.add('hidden');
+  }
   if (inviteButton) {
     inviteButton.disabled = false;
     if (!inviteButton.dataset.boundCopy) {
@@ -609,7 +611,7 @@ function renderRound() {
     othersTitle.textContent = 'Other hints';
     const mineTitle = document.createElement('div');
     mineTitle.className = 'column-title';
-    mineTitle.textContent = player?.role === 'guesser' ? 'My guess' : 'My hint';
+    mineTitle.textContent = 'My guess';
 
     othersColumn.appendChild(othersTitle);
     mineColumn.appendChild(mineTitle);
