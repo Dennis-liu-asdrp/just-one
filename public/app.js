@@ -1,3 +1,5 @@
+import { MiniFlappyGame } from './flappy.js';
+
 const joinSection = document.getElementById('join-section');
 const joinForm = document.getElementById('join-form');
 const nameInput = document.getElementById('name-input');
@@ -109,6 +111,23 @@ const guessControlsState = {
   form: null,
   input: null
 };
+
+const flappyContainer = document.createElement('div');
+flappyContainer.id = 'waiting-minigame';
+const flappyTitle = document.createElement('h3');
+flappyTitle.className = 'flappy-title';
+flappyTitle.textContent = 'Mini break: Flap while you wait';
+const flappyCaption = document.createElement('p');
+flappyCaption.className = 'flappy-caption';
+flappyCaption.textContent = 'Press space or tap to flap with your avatar.';
+const flappyCard = document.createElement('div');
+flappyCard.className = 'flappy-wrapper';
+flappyContainer.appendChild(flappyTitle);
+flappyContainer.appendChild(flappyCaption);
+flappyContainer.appendChild(flappyCard);
+
+let flappyGameInstance = null;
+let flappyActiveStage = null;
 
 init();
 
@@ -1557,13 +1576,65 @@ function setControlsMessage(text) {
   controlsEl.appendChild(card);
 }
 
+const flappyWaitingStages = new Set(['collecting_hints', 'reviewing_hints']);
+
+function updateFlappyGame(stage) {
+  if (!roundEl) return;
+
+  const shouldShow = Boolean(
+    player
+    && player.role === 'guesser'
+    && flappyWaitingStages.has(stage)
+  );
+
+  if (!shouldShow) {
+    flappyActiveStage = null;
+    teardownFlappyGame();
+    return;
+  }
+
+  if (!flappyGameInstance) {
+    flappyGameInstance = new MiniFlappyGame({
+      container: flappyCard,
+      getAvatar: () => (player?.avatar || defaultAvatar)
+    });
+  }
+
+  flappyGameInstance.setAvatar(player?.avatar || defaultAvatar);
+
+  if (!flappyContainer.isConnected) {
+    roundEl.insertBefore(flappyContainer, roundEl.firstChild || null);
+  }
+
+  if (flappyActiveStage === null) {
+    flappyGameInstance.reset();
+  }
+
+  flappyActiveStage = stage;
+  flappyGameInstance.start();
+}
+
+function teardownFlappyGame() {
+  if (flappyGameInstance) {
+    flappyGameInstance.stop();
+  }
+  if (flappyContainer.isConnected) {
+    flappyContainer.remove();
+  }
+  flappyActiveStage = null;
+}
+
 function renderRound() {
   const clueFocusState = captureClueFocusState();
   roundEl.innerHTML = '';
-  if (!player || !serverState) return;
+  if (!player || !serverState) {
+    teardownFlappyGame();
+    return;
+  }
 
   const round = serverState.round;
   if (!round) {
+    teardownFlappyGame();
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.textContent = 'No round in progress yet.';
@@ -1586,6 +1657,7 @@ function renderRound() {
   }
 
   const stage = round.stage;
+  updateFlappyGame(stage);
   const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
   const isHintPlayer = player.role === 'hint';
   const playerLocked = isHintPlayer && reviewLocks.includes(player.id);

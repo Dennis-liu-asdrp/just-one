@@ -1905,6 +1905,82 @@ button.pulse {
   display: none !important;
 }
 
+#waiting-minigame {
+  margin: 24px auto;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+#waiting-minigame .flappy-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1b365d;
+}
+
+#waiting-minigame .flappy-caption {
+  margin: 0;
+  color: #516071;
+  font-size: 0.9rem;
+}
+
+.flappy-wrapper {
+  width: 100%;
+  background: #f4fbff;
+  border-radius: 16px;
+  padding: 14px 14px 18px;
+  box-shadow: 0 16px 32px rgba(22, 48, 68, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.flappy-score {
+  font-weight: 600;
+  color: #124364;
+}
+
+.flappy-playfield {
+  position: relative;
+  width: 100%;
+}
+
+.flappy-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 12px;
+  background: #9ed4ff;
+}
+
+.flappy-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: #0f3057;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 12px;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+  transition: opacity 160ms ease-in-out, visibility 160ms ease-in-out;
+  font-size: 0.95rem;
+  padding: 0 16px;
+}
+
+.flappy-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;
