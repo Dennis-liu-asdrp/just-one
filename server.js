@@ -758,28 +758,6 @@ async function handleGetWord(req, res, params) {
   }
 }
 
-function allHintGiversLocked() {
-  if (!state.round) return false;
-  const locks = getRoundReviewLockSet(false);
-  if (locks.size === 0) return false;
-  const hintPlayers = state.players.filter(p => p.role === 'hint');
-  if (hintPlayers.length === 0) return false;
-  return hintPlayers.every(player => {
-    const contributed = state.round.hints.some(hint => hint.playerId === player.id);
-    return contributed && locks.has(player.id);
-  });
-}
-
-function maybeEnterReviewStage() {
-  if (!state.round) return false;
-  if (state.round.stage !== 'collecting_hints') return false;
-  if (!state.round.hints.length) return false;
-  if (!allHintGiversLocked()) return false;
-  state.round.stage = 'reviewing_hints';
-  state.round.reviewStartedAt = Date.now();
-  return true;
-}
-
 async function handleLeave(req, res) {
   try {
     const body = await readBody(req);
