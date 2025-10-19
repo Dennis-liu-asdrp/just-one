@@ -70,6 +70,12 @@ let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
 let instructionsModalOpen = false;
 let shouldAutoOpenInstructions = !hasSeenInstructionsBefore();
+const HINT_TYPING_IDLE_DELAY = 1800;
+const hintTypingState = {
+  active: false,
+  reported: false,
+  timeoutId: null
+};
 
 init();
 
@@ -465,6 +471,16 @@ function onStateChange() {
   const roundId = round?.id ?? null;
   const stage = round?.stage ?? null;
 
+  if (player?.role === 'hint') {
+    const reviewLocks = Array.isArray(round?.reviewLocks) ? round.reviewLocks : [];
+    const playerLocked = reviewLocks.includes(player.id);
+    if (!round || stage !== 'collecting_hints' || playerLocked) {
+      stopHintTypingImmediate({ notify: true });
+    }
+  } else {
+    stopHintTypingImmediate({ notify: true });
+  }
+
   if (player && serverState && !serverState.players.some(p => p.id === player.id)) {
     player = null;
     localStorage.removeItem('just-one-player');
@@ -719,7 +735,7 @@ function renderPlayers() {
       container.appendChild(empty);
     } else {
       group.players.forEach(record => {
-        container.appendChild(renderPlayerBadge(record));
+        container.appendChild(renderPlayerBadge(record, serverState.round));
       });
     }
 
@@ -727,7 +743,7 @@ function renderPlayers() {
   }
 }
 
-function renderPlayerBadge(playerRecord) {
+function renderPlayerBadge(playerRecord, round = null) {
   const pill = document.createElement('span');
   pill.className = 'player-pill';
   if (player && player.id === playerRecord.id) {
@@ -735,6 +751,13 @@ function renderPlayerBadge(playerRecord) {
   }
   const voted = Boolean(playerRecord?.votedToEnd);
   if (voted) pill.classList.add('has-voted');
+
+  const reviewLocks = Array.isArray(round?.reviewLocks) ? round.reviewLocks : [];
+  const typingHints = Array.isArray(round?.typingHints) ? round.typingHints : [];
+  const isReady = reviewLocks.includes(playerRecord.id);
+  if (isReady && playerRecord.role === 'hint') {
+    pill.classList.add('is-ready');
+  }
   
   const avatarEl = document.createElement('span');
   avatarEl.className = 'player-pill-avatar';
@@ -753,7 +776,77 @@ function renderPlayerBadge(playerRecord) {
     pill.appendChild(indicator);
   }
 
+  const showTyping = Boolean(
+    round &&
+    playerRecord.role === 'hint' &&
+    round.stage === 'collecting_hints' &&
+    typingHints.includes(playerRecord.id) &&
+    !reviewLocks.includes(playerRecord.id)
+  );
+
+  if (showTyping) {
+    pill.appendChild(buildTypingIndicator());
+  }
+
   return pill;
+}
+
+function buildTypingIndicator() {
+  const bubble = document.createElement('span');
+  bubble.className = 'typing-indicator';
+  bubble.setAttribute('role', 'status');
+  bubble.setAttribute('aria-live', 'polite');
+  for (let index = 0; index < 3; index += 1) {
+    const dot = document.createElement('span');
+    dot.className = 'typing-dot';
+    dot.style.animationDelay = `${index * 0.2}s`;
+    bubble.appendChild(dot);
+  }
+  return bubble;
+}
+
+function markHintTypingActivity() {
+  if (!player || player.role !== 'hint') return;
+  const round = serverState?.round;
+  if (!round || round.stage !== 'collecting_hints') return;
+  if (hintTypingState.timeoutId) {
+    window.clearTimeout(hintTypingState.timeoutId);
+    hintTypingState.timeoutId = null;
+  }
+  const wasActive = hintTypingState.active;
+  hintTypingState.active = true;
+  hintTypingState.timeoutId = window.setTimeout(() => {
+    hintTypingState.timeoutId = null;
+    hintTypingState.active = false;
+    void sendHintTypingState(false);
+  }, HINT_TYPING_IDLE_DELAY);
+  if (!wasActive || hintTypingState.reported !== true) {
+    void sendHintTypingState(true);
+  }
+}
+
+function stopHintTypingImmediate({ notify = false } = {}) {
+  if (hintTypingState.timeoutId) {
+    window.clearTimeout(hintTypingState.timeoutId);
+    hintTypingState.timeoutId = null;
+  }
+  const shouldNotify = notify || hintTypingState.active || hintTypingState.reported === true;
+  hintTypingState.active = false;
+  if (shouldNotify) {
+    void sendHintTypingState(false);
+  }
+}
+
+async function sendHintTypingState(active) {
+  if (!player) return;
+  if (!serverState?.round) return;
+  if (hintTypingState.reported === active) return;
+  try {
+    await apiPost('/api/hints/typing', { playerId: player.id, typing: active }, { silent: true });
+    hintTypingState.reported = active;
+  } catch (err) {
+    hintTypingState.reported = null;
+  }
 }
 
 function renderScore() {
@@ -1015,14 +1108,14 @@ function renderControls() {
           controlsEl.appendChild(button);
         }
       } else {
-        setControlsMessage('Hints are being prepared.');
+        setControlsMessage('Hint team is submitting clues.');
       }
       break;
     case 'reviewing_hints':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
       } else {
-        setControlsMessage('Hint givers are resolving collisions.');
+        setControlsMessage('Hint team is resolving collisions.');
       }
       break;
     case 'awaiting_guess':
@@ -1048,8 +1141,10 @@ function renderControls() {
           form.reset();
         });
         controlsEl.appendChild(form);
-      } else {
+      } else if (player.role !== 'hint') {
         setControlsMessage('Waiting for the guesser to decide.');
+      } else {
+        controlsEl.innerHTML = '';
       }
       break;
     case 'round_result': {
@@ -1102,6 +1197,10 @@ function renderRound() {
   const stage = round.stage;
   const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
   const playerLocked = player.role === 'hint' && reviewLocks.includes(player.id);
+
+  if (player.role === 'hint' && (playerLocked || stage !== 'collecting_hints')) {
+    stopHintTypingImmediate({ notify: true });
+  }
 
   if (round.hints.length > 0) {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
@@ -1217,6 +1316,7 @@ function renderRound() {
       if (submitButton) {
         submitButton.disabled = true;
       }
+      stopHintTypingImmediate({ notify: true });
     } else {
       form.addEventListener('submit', async evt => {
         evt.preventDefault();
@@ -1225,8 +1325,11 @@ function renderRound() {
           showMessage('Clue cannot be empty.', 'error');
           return;
         }
+        stopHintTypingImmediate({ notify: true });
         await submitHint(value);
       });
+      textarea.addEventListener('input', () => markHintTypingActivity());
+      textarea.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
     }
     roundEl.appendChild(form);
     if (playerLocked) {
@@ -1307,6 +1410,7 @@ async function beginReview() {
   if (!player) return;
   try {
     const result = await apiPost('/api/round/begin-review', { playerId: player.id });
+    stopHintTypingImmediate({ notify: true });
     if (result?.readyToReview) {
       showMessage('All hint givers are now reviewing collisions.');
     } else if (!result?.alreadyLocked) {
@@ -1351,13 +1455,13 @@ function buildButton(label, handler, disabled = false) {
 function formatStage(stage) {
   switch (stage) {
     case 'collecting_hints':
-      return 'Stage: Collecting hints';
+      return 'Collecting hints';
     case 'reviewing_hints':
-      return 'Stage: Reviewing collisions';
+      return 'Reviewing collisions';
     case 'awaiting_guess':
-      return 'Stage: Awaiting guess';
+      return 'Guess in progress';
     case 'round_result':
-      return 'Stage: Round result';
+      return 'Round result';
     default:
       return 'Waiting to start';
   }
