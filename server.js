@@ -33,11 +33,20 @@ const state = {
   gameConfig: {
     totalRounds: DEFAULT_TOTAL_ROUNDS
   },
+  settings: {
+    difficulty: 'easy'
+  },
   roundsCompleted: 0,
   gameOver: false,
   gameOverReason: null,
   endGameVotes: new Set()
 };
+
+const COMPOUND_PREFIXES = ['after','air','auto','earth','fire','grand','hand','home','inner','light','moon','north','outer','over','rain','shadow','snow','south','space','star','sun','super','under','water','west','wind'];
+const COMPOUND_SUFFIXES = ['craft','field','fire','house','land','light','maker','ship','song','space','sphere','stone','storm','time','town','walk','ward','work'];
+const COMMON_WORD_PARTS = new Set([
+  'ball','book','cloud','dream','forest','gold','heart','light','night','river','road','sky','space','spring','storm','table','watch','wood','world'
+]);
 
 const playerStats = new Map();
 
@@ -384,6 +393,14 @@ async function handleSubmitHint(req, res) {
       return;
     }
 
+    if (state.settings?.difficulty === 'hard') {
+      const validationError = validateHardModeHint(text);
+      if (validationError) {
+        respond(res, 400, { error: validationError });
+        return;
+      }
+    }
+
     const existing = state.round.hints.find(h => h.playerId === player.id);
     if (existing) {
       existing.text = text;
@@ -616,16 +633,60 @@ async function handleUpdateSettings(req, res) {
       return;
     }
 
-    const normalized = normalizeTotalRounds(body.totalRounds);
-    if (!normalized) {
-      respond(res, 400, { error: 'Total rounds must be between 1 and 20' });
+    const hasTotalRounds = Object.prototype.hasOwnProperty.call(body, 'totalRounds');
+    const hasDifficulty = Object.prototype.hasOwnProperty.call(body, 'difficulty');
+
+    if (!hasTotalRounds && !hasDifficulty) {
+      respond(res, 200, {
+        totalRounds: state.gameConfig.totalRounds,
+        difficulty: state.settings.difficulty
+      });
       return;
     }
 
-    state.gameConfig.totalRounds = normalized;
-    resetGameProgress();
-    respond(res, 200, { totalRounds: normalized });
-    broadcastState();
+    let nextTotal = state.gameConfig.totalRounds;
+    if (hasTotalRounds) {
+      const normalized = normalizeTotalRounds(body.totalRounds);
+      if (normalized === null) {
+        respond(res, 400, { error: `Total rounds must be between 1 and ${MAX_TOTAL_ROUNDS}` });
+        return;
+      }
+      nextTotal = normalized;
+    }
+
+    let nextDifficulty = state.settings?.difficulty || 'easy';
+    if (hasDifficulty) {
+      const difficultyRaw = typeof body.difficulty === 'string' ? body.difficulty.toLowerCase() : '';
+      if (difficultyRaw === 'hard' || difficultyRaw === 'easy') {
+        nextDifficulty = difficultyRaw;
+      } else {
+        respond(res, 400, { error: 'Difficulty must be "easy" or "hard"' });
+        return;
+      }
+    }
+
+    const totalChanged = nextTotal !== state.gameConfig.totalRounds;
+    const difficultyChanged = nextDifficulty !== (state.settings?.difficulty || 'easy');
+
+    if (totalChanged) {
+      state.gameConfig.totalRounds = nextTotal;
+      resetGameProgress();
+    }
+
+    if (!state.settings) {
+      state.settings = { difficulty: nextDifficulty };
+    } else if (difficultyChanged) {
+      state.settings.difficulty = nextDifficulty;
+    }
+
+    respond(res, 200, {
+      totalRounds: state.gameConfig.totalRounds,
+      difficulty: state.settings.difficulty
+    });
+
+    if (totalChanged || difficultyChanged) {
+      broadcastState();
+    }
   } catch (err) {
     respond(res, 400, { error: err.message });
   }
@@ -686,7 +747,11 @@ async function handleResetGame(req, res) {
     state.wordDeck = shuffle([...words]);
     state.lastWord = null;
     state.score = { success: 0, failure: 0 };
-    state.settings.difficulty = state.settings.difficulty || 'easy';
+    if (!state.settings) {
+      state.settings = { difficulty: 'easy' };
+    } else if (!state.settings.difficulty) {
+      state.settings.difficulty = 'easy';
+    }
     broadcastState();
     respond(res, 200, { success: true });
   } catch (err) {
@@ -857,8 +922,52 @@ function serializeState() {
         count: state.endGameVotes.size,
         required: state.players.length
       }
+    },
+    settings: {
+      difficulty: state.settings?.difficulty || 'easy'
     }
   };
+}
+
+function validateHardModeHint(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return 'Hint text is required';
+  if (containsMultipleWords(trimmed)) return 'Hint cannot contain more than one word';
+  if (isProperNounWord(trimmed)) return 'Proper nouns are not allowed';
+  return null;
+}
+
+function containsMultipleWords(text) {
+  if (/\s/.test(text)) return true;
+  if (/[\-_/]/.test(text)) return true;
+  if (/[a-z][A-Z]/.test(text)) return true;
+  const alphaOnly = text.replace(/[^A-Za-z]/g, '');
+  if (!alphaOnly) return false;
+  if (alphaOnly.length >= 6 && looksLikeCompoundWord(alphaOnly.toLowerCase())) return true;
+  return false;
+}
+
+function isProperNounWord(word) {
+  const parts = word.split(/[^A-Za-z]+/).filter(Boolean);
+  if (parts.length === 0) return false;
+  return parts.some(part => {
+    if (part.length <= 1) return false;
+    if (/^[A-Z][a-z]+$/.test(part)) return true;
+    if (/^[A-Z]{2,}$/.test(part)) return true;
+    return false;
+  });
+}
+
+function looksLikeCompoundWord(word) {
+  for (const prefix of COMPOUND_PREFIXES) {
+    if (word.startsWith(prefix) && word.length - prefix.length >= 3) {
+      const suffix = word.slice(prefix.length);
+      if (COMPOUND_SUFFIXES.includes(suffix) || COMPOUND_PREFIXES.includes(suffix) || COMMON_WORD_PARTS.has(suffix)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function syncPlayerStats(playerId, name) {

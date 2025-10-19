@@ -91,11 +91,43 @@
       <form id="settings-form" class="settings-form">
         <h3 id="settings-modal-title">Game settings</h3>
         <p class="settings-subtitle">Adjust the table before the next round begins.</p>
-        <label for="settings-total-rounds">
-          <span>Total rounds per game</span>
-          <input type="number" id="settings-total-rounds" name="totalRounds" min="1" max="20" step="1" required />
-        </label>
-        <p class="settings-hint">Choose between 1 and 20 rounds. Settings apply once saved and the next round starts.</p>
+
+        <fieldset class="settings-fieldset">
+          <legend>Game length</legend>
+          <label for="settings-total-rounds">
+            <span>Total rounds per game</span>
+            <input type="number" id="settings-total-rounds" name="totalRounds" min="1" max="20" step="1" required />
+          </label>
+          <p class="settings-hint">Choose between 1 and 20 rounds. Settings apply once saved and the next round starts.</p>
+        </fieldset>
+
+        <fieldset class="settings-fieldset">
+          <legend>Difficulty</legend>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="easy" checked />
+            <span>Easy mode</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-difficulty" value="hard" />
+            <span>Hard mode</span>
+          </label>
+        </fieldset>
+        <p class="settings-description">Hard mode blocks proper nouns and multi-word hints.</p>
+
+        <fieldset class="settings-fieldset">
+          <legend>Change role</legend>
+          <p class="settings-note">Switch roles between rounds. Only one guesser can be active.</p>
+          <p id="role-warning" class="settings-warning" aria-live="polite"></p>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="guesser" />
+            <span>Be the guesser</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="setting-role" value="hint" checked />
+            <span>Give hints</span>
+          </label>
+        </fieldset>
+
         <button type="submit" class="settings-save">Save settings</button>
       </form>
     </div>

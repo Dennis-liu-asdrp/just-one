@@ -19,6 +19,9 @@ const settingsModal = document.getElementById('settings-modal');
 const settingsModalClose = document.getElementById('settings-modal-close');
 const settingsForm = document.getElementById('settings-form');
 const settingsTotalRoundsInput = document.getElementById('settings-total-rounds');
+const difficultyInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-difficulty"]')) : [];
+const roleInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-role"]')) : [];
+const roleWarningEl = document.getElementById('role-warning');
 const gameColumns = document.getElementById('game-columns');
 const leaderboardPanel = document.getElementById('leaderboard-panel');
 const leaderboardList = document.getElementById('leaderboard-list');
@@ -37,9 +40,13 @@ let currentWord = null;
 let buttonFeedbackInitialized = false;
 let audioContext = null;
 let settingsModalOpen = false;
-let currentGameConfig = {
+let shouldAutoOpenSettings = false;
+let roleWarningTimeout = null;
+let roleWarningClearTimeout = null;
+let currentSettings = {
   totalRounds: 10,
-  maxRounds: 20
+  maxRounds: 20,
+  difficulty: 'easy'
 };
 
 init();
@@ -94,6 +101,18 @@ function setupSettings() {
   if (settingsForm) {
     settingsForm.addEventListener('submit', handleSettingsSubmit);
   }
+
+  difficultyInputs.forEach(input => {
+    input.addEventListener('change', handleDifficultyChange);
+  });
+
+  roleInputs.forEach(input => {
+    input.addEventListener('change', handleRoleChange);
+    const label = input.closest('label');
+    if (label) {
+      label.addEventListener('click', event => handleRoleOptionClick(event, input));
+    }
+  });
 }
 
 async function restorePlayer() {
@@ -117,13 +136,16 @@ async function restorePlayer() {
     const { player: refreshed } = await silentlyRejoin(stored);
     player = refreshed;
     localStorage.setItem('just-one-player', JSON.stringify(refreshed));
+    shouldAutoOpenSettings = true;
   } catch (err) {
     console.warn('Failed to restore session', err);
     localStorage.removeItem('just-one-player');
     player = null;
+    shouldAutoOpenSettings = false;
   }
 
   updateLayout();
+  maybeAutoOpenSettings();
 }
 
 async function silentlyRejoin(existing) {
@@ -262,7 +284,9 @@ async function handleJoinSubmit(event) {
     player = joined;
     localStorage.setItem('just-one-player', JSON.stringify(joined));
     roleSelect.value = joined.role;
+    shouldAutoOpenSettings = true;
     updateLayout();
+    maybeAutoOpenSettings();
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
     // error already surfaced by apiPost
@@ -283,6 +307,9 @@ function updateLayout() {
     renderRoundProgress();
     renderEndGameControls();
     renderSettingsButtonState();
+    applySettingsFormState();
+    shouldAutoOpenSettings = false;
+    closeSettingsModal(true);
     return;
   }
 
@@ -298,6 +325,8 @@ function updateLayout() {
   renderControls();
   renderRound();
   renderLeaderboard();
+  applySettingsFormState();
+  maybeAutoOpenSettings();
 }
 
 function renderPlayerInfo() {
@@ -333,6 +362,12 @@ function renderPlayerInfo() {
     notice.textContent = 'Roles are locked until this round is complete.';
     playerInfo.appendChild(notice);
   }
+
+  const friendlyDifficulty = currentSettings.difficulty === 'hard' ? 'Hard mode' : 'Easy mode';
+  const settingsSummary = document.createElement('div');
+  settingsSummary.className = 'settings-summary';
+  settingsSummary.textContent = `Difficulty: ${friendlyDifficulty}`;
+  playerInfo.appendChild(settingsSummary);
 
   const actions = document.createElement('div');
   actions.className = 'player-actions';
@@ -458,7 +493,7 @@ function renderEndGameControls() {
 
 function renderSettingsButtonState() {
   if (!settingsButton) return;
-  const canEdit = Boolean(player) && !serverState?.round;
+  const canEdit = canEditSettings();
   settingsButton.disabled = !canEdit;
   settingsButton.title = canEdit
     ? 'Adjust game settings'
@@ -918,19 +953,23 @@ function showMessage(text, type = 'info') {
   }, 3000);
 }
 
-function openSettingsModal() {
+function openSettingsModal({ auto = false } = {}) {
   if (!settingsModal || !settingsButton) return;
   if (!canEditSettings()) {
-    showMessage('Finish the current round before updating settings.', 'error');
+    if (!auto) {
+      showMessage('Finish the current round before updating settings.', 'error');
+    }
     return;
   }
   settingsModal.classList.remove('hidden');
   settingsModal.classList.remove('is-hiding');
   settingsModal.classList.add('is-visible');
   settingsModalOpen = true;
+  shouldAutoOpenSettings = false;
   settingsButton.setAttribute('aria-expanded', 'true');
+  applySettingsFormState();
   if (settingsTotalRoundsInput) {
-    settingsTotalRoundsInput.value = String(currentGameConfig.totalRounds ?? 10);
+    settingsTotalRoundsInput.value = String(currentSettings.totalRounds ?? 10);
     settingsTotalRoundsInput.focus({ preventScroll: true });
     settingsTotalRoundsInput.select();
   }
@@ -964,6 +1003,7 @@ function closeSettingsModal(force = false) {
   if (!force) {
     settingsButton.focus({ preventScroll: true });
   }
+  hideRoleWarning();
   document.removeEventListener('keydown', handleSettingsKeydown);
 }
 
@@ -980,40 +1020,227 @@ async function handleSettingsSubmit(event) {
     showMessage('Join the table first.', 'error');
     return;
   }
+  if (!canEditSettings()) {
+    showMessage('Finish the current round before updating settings.', 'error');
+    applySettingsFormState();
+    return;
+  }
   if (!settingsTotalRoundsInput) return;
   const rawValue = Number(settingsTotalRoundsInput.value);
-  if (!Number.isFinite(rawValue) || rawValue < 1 || rawValue > (currentGameConfig.maxRounds ?? 20)) {
-    showMessage('Choose a number of rounds between 1 and 20.', 'error');
+  const maxRounds = currentSettings.maxRounds ?? 20;
+  if (!Number.isFinite(rawValue) || rawValue < 1 || rawValue > maxRounds) {
+    showMessage(`Choose a number of rounds between 1 and ${maxRounds}.`, 'error');
+    settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
     return;
   }
   const totalRounds = Math.round(rawValue);
+  const selectedDifficulty = difficultyInputs.find(input => input.checked)?.value === 'hard' ? 'hard' : 'easy';
   try {
-    await apiPost('/api/game/settings', {
+    const response = await apiPost('/api/game/settings', {
       playerId: player.id,
-      totalRounds
+      totalRounds,
+      difficulty: selectedDifficulty
     });
-    showMessage(`Game set to ${totalRounds} rounds.`);
+    if (typeof response.totalRounds === 'number') {
+      currentSettings.totalRounds = response.totalRounds;
+    }
+    if (typeof response.difficulty === 'string') {
+      currentSettings.difficulty = response.difficulty === 'hard' ? 'hard' : 'easy';
+    }
+    applySettingsFormState();
+    showMessage('Settings updated.');
     closeSettingsModal();
   } catch (err) {
-    // message already surfaced by apiPost
+    applySettingsFormState();
   }
+}
+
+async function handleDifficultyChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'hard' ? 'hard' : 'easy';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (!canEditSettings()) {
+    showMessage('Finish the current round before updating settings.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === currentSettings.difficulty) {
+    return;
+  }
+  try {
+    const response = await apiPost('/api/game/settings', {
+      playerId: player.id,
+      difficulty: value,
+      totalRounds: currentSettings.totalRounds
+    });
+    if (typeof response.difficulty === 'string') {
+      currentSettings.difficulty = response.difficulty === 'hard' ? 'hard' : 'easy';
+    }
+    if (typeof response.totalRounds === 'number') {
+      currentSettings.totalRounds = response.totalRounds;
+    }
+    applySettingsFormState();
+    showMessage(value === 'hard' ? 'Hard mode enabled.' : 'Easy mode enabled.');
+  } catch (err) {
+    applySettingsFormState();
+  }
+}
+
+async function handleRoleChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const value = target.value === 'guesser' ? 'guesser' : 'hint';
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  const roundStage = serverState?.round?.stage ?? null;
+  if (roundStage && roundStage !== 'round_result') {
+    showMessage('Finish the current round before changing roles.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (value === player.role) return;
+
+  try {
+    const { player: updated } = await apiPost('/api/join', {
+      playerId: player.id,
+      name: player.name,
+      role: value
+    });
+    player = updated;
+    localStorage.setItem('just-one-player', JSON.stringify(updated));
+    showMessage(value === 'guesser' ? 'You are now the guesser.' : 'You are now a hint giver.');
+  } catch (err) {
+    if (typeof err?.message === 'string' && err.message.toLowerCase().includes('guesser')) {
+      showRoleLimitWarning();
+    }
+  } finally {
+    applySettingsFormState();
+  }
+}
+
+function handleRoleOptionClick(event, input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  if (!input.disabled) return;
+  if (!player) return;
+  if (input.value !== 'guesser') return;
+  const roundStage = serverState?.round?.stage ?? null;
+  if (roundStage && roundStage !== 'round_result') return;
+  const guesserTaken = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player.id));
+  if (!guesserTaken) return;
+  event.preventDefault();
+  showRoleLimitWarning();
+}
+
+function showRoleLimitWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.textContent = 'There can be a maximum of one guesser at any time.';
+  roleWarningEl.classList.add('is-visible');
+  roleWarningTimeout = window.setTimeout(() => {
+    roleWarningEl.classList.remove('is-visible');
+    roleWarningTimeout = null;
+    roleWarningClearTimeout = window.setTimeout(() => {
+      roleWarningEl.textContent = '';
+      roleWarningClearTimeout = null;
+    }, 220);
+  }, 2400);
+}
+
+function hideRoleWarning() {
+  if (!roleWarningEl) return;
+  if (roleWarningTimeout) {
+    window.clearTimeout(roleWarningTimeout);
+    roleWarningTimeout = null;
+  }
+  if (roleWarningClearTimeout) {
+    window.clearTimeout(roleWarningClearTimeout);
+    roleWarningClearTimeout = null;
+  }
+  roleWarningEl.classList.remove('is-visible');
+  roleWarningEl.textContent = '';
+}
+
+function applySettingsFormState() {
+  const canEdit = canEditSettings();
+  if (settingsTotalRoundsInput) {
+    const focused = document.activeElement === settingsTotalRoundsInput;
+    if (!focused) {
+      settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    }
+    settingsTotalRoundsInput.min = '1';
+    settingsTotalRoundsInput.max = String(currentSettings.maxRounds);
+    settingsTotalRoundsInput.disabled = !canEdit;
+  }
+  const currentDifficulty = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
+  difficultyInputs.forEach(input => {
+    input.checked = input.value === currentDifficulty;
+    input.disabled = !canEdit;
+  });
+
+  const roundStage = serverState?.round?.stage ?? null;
+  const roundLocked = Boolean(roundStage && roundStage !== 'round_result');
+  const currentRole = player?.role === 'guesser' ? 'guesser' : 'hint';
+  const otherGuesserExists = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player?.id));
+  roleInputs.forEach(input => {
+    const isGuesser = input.value === 'guesser';
+    input.checked = input.value === currentRole;
+    const disableBecauseNoPlayer = !player;
+    const disableBecauseRound = roundLocked;
+    const disableBecauseTaken = isGuesser && otherGuesserExists && currentRole !== 'guesser';
+    input.disabled = disableBecauseNoPlayer || disableBecauseRound || disableBecauseTaken;
+  });
+  if (!player || roundLocked || currentRole === 'guesser' || !otherGuesserExists) {
+    hideRoleWarning();
+  }
+}
+
+function maybeAutoOpenSettings() {
+  if (!shouldAutoOpenSettings) return;
+  if (!player) return;
+  if (settingsModalOpen) return;
+  if (!canEditSettings()) return;
+  openSettingsModal({ auto: true });
 }
 
 function syncSettingsFromServer() {
   const game = serverState?.game;
-  if (!game) return;
-  const nextTotal = Number.isFinite(game.totalRounds) ? Number(game.totalRounds) : currentGameConfig.totalRounds;
-  const nextMax = Number.isFinite(game.maxRounds) ? Number(game.maxRounds) : currentGameConfig.maxRounds;
-  const changed = nextTotal !== currentGameConfig.totalRounds || nextMax !== currentGameConfig.maxRounds;
-  currentGameConfig = {
+  const settings = serverState?.settings;
+  if (!game && !settings) return;
+  const nextTotal = Number.isFinite(game?.totalRounds) ? Number(game.totalRounds) : currentSettings.totalRounds;
+  const nextMax = Number.isFinite(game?.maxRounds) ? Number(game.maxRounds) : currentSettings.maxRounds;
+  const nextDifficulty = settings?.difficulty === 'hard'
+    ? 'hard'
+    : settings?.difficulty === 'easy'
+      ? 'easy'
+      : currentSettings.difficulty;
+  const changed = nextTotal !== currentSettings.totalRounds
+    || nextMax !== currentSettings.maxRounds
+    || nextDifficulty !== currentSettings.difficulty;
+  currentSettings = {
     totalRounds: nextTotal,
-    maxRounds: nextMax
+    maxRounds: nextMax,
+    difficulty: nextDifficulty
   };
   if (settingsTotalRoundsInput) {
-    settingsTotalRoundsInput.max = String(currentGameConfig.maxRounds);
-  }
-  if (changed && settingsModalOpen && settingsTotalRoundsInput) {
-    settingsTotalRoundsInput.value = String(currentGameConfig.totalRounds);
+    settingsTotalRoundsInput.max = String(currentSettings.maxRounds);
+    if (changed && settingsModalOpen) {
+      settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    }
   }
 }
 

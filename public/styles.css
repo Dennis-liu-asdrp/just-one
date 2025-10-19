@@ -894,6 +894,22 @@ button.pulse {
   gap: 18px;
 }
 
+.settings-fieldset {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.settings-fieldset legend {
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
 .settings-form label span {
   font-size: 0.85rem;
   letter-spacing: 0.08em;
@@ -907,10 +923,57 @@ button.pulse {
   color: var(--text-secondary);
 }
 
+.settings-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settings-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+}
+
 .settings-hint {
   margin: -6px 0 0;
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+.settings-note {
+  margin: -4px 0 2px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.settings-warning {
+  margin: -2px 0 2px;
+  font-size: 0.82rem;
+  color: #fca5a5;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  min-height: 1.1em;
+}
+
+.settings-warning.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.settings-description {
+  margin: -10px 0 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.settings-summary {
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
 }
 
 .settings-save {
