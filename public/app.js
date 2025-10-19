@@ -1589,12 +1589,6 @@ function renderRound() {
           input.value = hintDraft.value;
           input.className = 'hint-inline-input';
 
-          const submitButton = document.createElement('button');
-          submitButton.type = 'submit';
-          submitButton.className = 'hint-inline-submit';
-          submitButton.textContent = '(submit)';
-          submitButton.disabled = !canEditHint;
-
           if (isEditing) {
             displayWrap.classList.add('is-hidden');
           } else {
@@ -1639,7 +1633,6 @@ function renderRound() {
 
           form.appendChild(displayWrap);
           form.appendChild(input);
-          form.appendChild(submitButton);
           row.appendChild(form);
 
           if (isEditing) {
@@ -1647,10 +1640,6 @@ function renderRound() {
           }
         } else {
           if (ownHint) {
-            const form = document.createElement('form');
-            form.className = 'hint-inline-form is-static';
-            form.setAttribute('aria-disabled', 'true');
-
             const displayWrap = document.createElement('div');
             displayWrap.className = 'hint-inline-display';
             const displaySpan = document.createElement('span');
@@ -1659,16 +1648,7 @@ function renderRound() {
               displayWrap.classList.add('is-empty');
             }
             displayWrap.appendChild(displaySpan);
-
-            const submitButton = document.createElement('button');
-            submitButton.type = 'button';
-            submitButton.className = 'hint-inline-submit';
-            submitButton.textContent = '(submit)';
-            submitButton.disabled = true;
-
-            form.appendChild(displayWrap);
-            form.appendChild(submitButton);
-            row.appendChild(form);
+            row.appendChild(displayWrap);
           } else {
             const textEl = document.createElement('div');
             textEl.className = 'hint-text';

@@ -1589,10 +1589,7 @@ button.pulse {
 }
 
 .hint-inline-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
+  display: block;
   width: 100%;
   margin: 0;
   padding: 0;
@@ -1600,7 +1597,6 @@ button.pulse {
 
 .hint-inline-display,
 .hint-inline-input {
-  grid-column: 1 / 2;
   width: 100%;
 }
 
@@ -1631,10 +1627,6 @@ button.pulse {
   font-style: italic;
 }
 
-.hint-inline-form.is-static .hint-inline-display {
-  cursor: not-allowed;
-}
-
 .hint-inline-input {
   padding: 10px 14px;
   border-radius: 14px;
@@ -1644,36 +1636,6 @@ button.pulse {
   font-size: 1.05rem;
   line-height: 1.4;
   min-width: 0;
-}
-
-.hint-inline-submit {
-  grid-column: 2 / 3;
-  padding: 0;
-  border-radius: 999px;
-  background: none;
-  border: none;
-  color: #5eead4;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  box-shadow: none;
-  text-transform: lowercase;
-  transition: color 0.2s ease;
-}
-
-.hint-inline-submit:hover:not(:disabled),
-.hint-inline-submit:focus-visible {
-  color: #99f6e4;
-  outline: none;
-}
-
-.hint-inline-submit:disabled {
-  color: rgba(148, 163, 184, 0.5);
-  cursor: not-allowed;
-}
-
-.hint-inline-form.is-static .hint-inline-submit {
-  cursor: not-allowed;
 }
 
 .is-hidden {
