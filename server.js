@@ -17,6 +17,8 @@ const allowedAvatars = Object.freeze([
   '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
 ]);
 const defaultAvatar = '🙂';
+const MAX_CHAT_HISTORY = 200;
+const MAX_CHAT_LENGTH = 280;
 
 function normalizeAvatar(value) {
   if (typeof value !== 'string') return defaultAvatar;
@@ -120,6 +122,11 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/hints' && req.method === 'POST') {
     await handleSubmitHint(req, res);
+    return;
+  }
+
+  if (pathname === '/api/round/chat' && req.method === 'POST') {
+    await handlePostChat(req, res);
     return;
   }
 
@@ -298,6 +305,7 @@ async function handleJoin(req, res) {
 
     syncPlayerStats(player.id, player.name);
     state.endGameVotes.delete(player.id);
+    recomputeHintConsensus();
 
     respond(res, 200, { player });
     broadcastState();
@@ -362,6 +370,7 @@ async function handleStartRound(req, res) {
       createdAt: Date.now(),
       startedBy: player.id,
       hints: [],
+      chatMessages: [],
       guess: null,
       revealedAt: null,
       finishedAt: null,
@@ -420,9 +429,16 @@ async function handleSubmitHint(req, res) {
 
     const existing = state.round.hints.find(h => h.playerId === player.id);
     if (existing) {
+      const textChanged = existing.text !== text;
       existing.text = text;
-      existing.updatedAt = Date.now();
+      existing.author = player.name;
       existing.avatar = player.avatar || defaultAvatar;
+      existing.updatedAt = Date.now();
+      ensureHintVoteSet(existing);
+      if (textChanged) {
+        existing.eliminationVotes.clear();
+        existing.invalid = false;
+      }
     } else {
       state.round.hints.push({
         id: randomUUID(),
@@ -431,11 +447,13 @@ async function handleSubmitHint(req, res) {
         text,
         invalid: false,
         avatar: player.avatar || defaultAvatar,
+        eliminationVotes: new Set(),
         submittedAt: Date.now(),
         updatedAt: Date.now()
       });
     }
 
+    recomputeHintConsensus();
     const typingHints = getRoundTypingSet();
     typingHints.delete(player.id);
 
@@ -642,11 +660,21 @@ async function handleMarkHint(req, res, hintId) {
       respond(res, 404, { error: 'Hint not found' });
       return;
     }
-    hint.invalid = Boolean(body.invalid);
-    hint.markedBy = player.id;
-    hint.markedAt = Date.now();
 
-    respond(res, 200, { success: true });
+    const wantsEliminate = Boolean(body.invalid);
+    ensureHintVoteSet(hint);
+    if (wantsEliminate) {
+      hint.eliminationVotes.add(player.id);
+    } else {
+      hint.eliminationVotes.delete(player.id);
+    }
+
+    recomputeHintConsensus();
+
+    respond(res, 200, {
+      success: true,
+      votes: hint.eliminationVotes.size
+    });
     broadcastState();
   } catch (err) {
     respond(res, 400, { error: err.message });
@@ -944,6 +972,7 @@ function removePlayer(playerId) {
       }
     }
   }
+  recomputeHintConsensus();
   return evaluateEndGameVotes();
 }
 
@@ -1084,6 +1113,7 @@ function refreshWordDeck() {
 }
 
 function serializeState() {
+  const hintGiverIds = state.players.filter(p => p.role === 'hint').map(p => p.id);
   const round = state.round
     ? {
         id: state.round.id,
@@ -1095,7 +1125,8 @@ function serializeState() {
           author: hint.author,
           text: hint.text,
           invalid: hint.invalid,
-          avatar: hint.avatar || getPlayerAvatar(hint.playerId)
+          avatar: hint.avatar || getPlayerAvatar(hint.playerId),
+          eliminationVotes: Array.from(hint.eliminationVotes instanceof Set ? hint.eliminationVotes : Array.isArray(hint.eliminationVotes) ? new Set(hint.eliminationVotes) : new Set())
         })),
         reviewLocks: Array.from(getRoundReviewLockSet(false)),
         guess: state.round.guess
@@ -1109,7 +1140,17 @@ function serializeState() {
           : null,
         revealedAt: state.round.revealedAt,
         finishedAt: state.round.finishedAt,
-        wordRevealed: state.round.stage === 'round_result'
+        wordRevealed: state.round.stage === 'round_result',
+        chatMessages: Array.isArray(state.round.chatMessages)
+          ? state.round.chatMessages.map(message => ({
+              id: message.id,
+              playerId: message.playerId,
+              name: message.name,
+              avatar: message.avatar || getPlayerAvatar(message.playerId),
+              text: message.text,
+              createdAt: message.createdAt
+            }))
+          : []
       }
     : null;
 
@@ -1143,7 +1184,8 @@ function serializeState() {
     settings: {
       difficulty: state.settings?.difficulty || 'easy'
     },
-    availableAvatars: allowedAvatars
+    availableAvatars: allowedAvatars,
+    hintGiverCount: hintGiverIds.length
   };
 }
 
@@ -1153,6 +1195,95 @@ function validateHardModeHint(text) {
   if (containsMultipleWords(trimmed)) return 'Hint cannot contain more than one word';
   if (isProperNounWord(trimmed)) return 'Proper nouns are not allowed';
   return null;
+}
+
+async function handlePostChat(req, res) {
+  try {
+    if (!state.round) {
+      respond(res, 409, { error: 'No active round' });
+      return;
+    }
+    const stage = state.round.stage;
+    if (!['collecting_hints', 'reviewing_hints'].includes(stage)) {
+      respond(res, 409, { error: 'Chat is only available while preparing clues' });
+      return;
+    }
+
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+    if (player.role !== 'hint') {
+      respond(res, 403, { error: 'Only hint-givers can chat here' });
+      return;
+    }
+
+    const rawText = typeof body.text === 'string' ? body.text : String(body.text ?? '');
+    const text = rawText.trim();
+    if (!text) {
+      respond(res, 400, { error: 'Message cannot be empty' });
+      return;
+    }
+    const limited = text.length > MAX_CHAT_LENGTH ? text.slice(0, MAX_CHAT_LENGTH).trim() : text;
+
+    if (!Array.isArray(state.round.chatMessages)) {
+      state.round.chatMessages = [];
+    }
+
+    state.round.chatMessages.push({
+      id: randomUUID(),
+      playerId: player.id,
+      name: player.name,
+      avatar: player.avatar || defaultAvatar,
+      text: limited,
+      createdAt: Date.now()
+    });
+
+    if (state.round.chatMessages.length > MAX_CHAT_HISTORY) {
+      state.round.chatMessages.splice(0, state.round.chatMessages.length - MAX_CHAT_HISTORY);
+    }
+
+    respond(res, 200, { success: true });
+    broadcastState();
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
+function ensureHintVoteSet(hint) {
+  if (!hint) return;
+  if (hint.eliminationVotes instanceof Set) return;
+  if (Array.isArray(hint.eliminationVotes)) {
+    hint.eliminationVotes = new Set(hint.eliminationVotes);
+    return;
+  }
+  if (hint.eliminationVotes && typeof hint.eliminationVotes === 'object') {
+    hint.eliminationVotes = new Set(Object.values(hint.eliminationVotes));
+    return;
+  }
+  hint.eliminationVotes = new Set();
+}
+
+function getHintGiverIds() {
+  return state.players.filter(p => p.role === 'hint').map(p => p.id);
+}
+
+function recomputeHintConsensus() {
+  if (!state.round || !Array.isArray(state.round.hints)) return;
+  const hintGiverIds = getHintGiverIds();
+  const required = hintGiverIds.length;
+  state.round.hints.forEach(hint => {
+    ensureHintVoteSet(hint);
+    for (const voter of Array.from(hint.eliminationVotes)) {
+      if (!hintGiverIds.includes(voter)) {
+        hint.eliminationVotes.delete(voter);
+      }
+    }
+    hint.invalid = required > 0 && hintGiverIds.every(id => hint.eliminationVotes.has(id));
+  });
 }
 
 function containsMultipleWords(text) {

@@ -33,9 +33,15 @@ const avatarPickerButton = document.getElementById('avatar-picker-button');
 const avatarPickerCurrent = document.getElementById('avatar-picker-current');
 const avatarModal = document.getElementById('avatar-modal');
 const avatarModalClose = document.getElementById('avatar-modal-close');
+const hintChatSection = document.getElementById('hint-chat');
+const hintChatMessages = document.getElementById('hint-chat-messages');
+const hintChatForm = document.getElementById('hint-chat-form');
+const hintChatInput = document.getElementById('hint-chat-input');
+const hintChatStatus = document.getElementById('hint-chat-status');
 const instructionsButton = document.getElementById('instructions-button');
 const instructionsModal = document.getElementById('instructions-modal');
 const instructionsModalClose = document.getElementById('instructions-modal-close');
+
 
 let leaderboardView = 'room';
 
@@ -68,6 +74,8 @@ let currentSettings = {
 let availableAvatars = [...fallbackAvatars];
 let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
+let hintChatAutoScroll = true;
+let lastRenderedChatRoundId = null;
 let instructionsModalOpen = false;
 let shouldAutoOpenInstructions = !hasSeenInstructionsBefore();
 const HINT_TYPING_IDLE_DELAY = 1800;
@@ -99,6 +107,7 @@ function init() {
   }
   setupSettings();
   setupAvatarPicker();
+  setupHintChat();
   setupInstructions();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
@@ -138,6 +147,19 @@ function setupAvatarPicker() {
   }
 }
 
+function setupHintChat() {
+  if (hintChatMessages) {
+    hintChatMessages.addEventListener('scroll', () => {
+      if (!hintChatMessages) return;
+      const { scrollTop, scrollHeight, clientHeight } = hintChatMessages;
+      hintChatAutoScroll = scrollHeight - (scrollTop + clientHeight) < 32;
+    });
+  }
+
+  if (hintChatForm) {
+    hintChatForm.addEventListener('submit', handleHintChatSubmit);
+  }
+}
 function setupInstructions() {
   if (!instructionsButton || !instructionsModal) {
     shouldAutoOpenInstructions = false;
@@ -620,6 +642,7 @@ function updateLayout() {
     applySettingsFormState();
     shouldAutoOpenSettings = false;
     closeSettingsModal(true);
+    renderHintChat();
     return;
   }
 
@@ -634,6 +657,7 @@ function updateLayout() {
   renderSettingsButtonState();
   renderControls();
   renderRound();
+  renderHintChat();
   renderLeaderboard();
   applySettingsFormState();
   renderSettingsButtonState();
@@ -1265,12 +1289,46 @@ function renderRound() {
 
         li.appendChild(content);
 
+        const votes = Array.isArray(hint.eliminationVotes)
+          ? Array.from(new Set(hint.eliminationVotes))
+          : [];
+        const totalHintGivers = getHintGiverCount();
+        const votesCount = Math.min(votes.length, totalHintGivers);
+        const playerHasVoted = votes.includes(player?.id ?? '');
+
         if (player.role === 'hint' && stage === 'reviewing_hints') {
           const toggle = document.createElement('button');
           toggle.type = 'button';
-          toggle.textContent = hint.invalid ? 'Restore' : 'Eliminate';
-          toggle.addEventListener('click', () => toggleHint(hint));
+          toggle.className = 'hint-eliminate-button';
+          if (playerHasVoted) {
+            toggle.classList.add('is-voted');
+          }
+          const voteLabel = `${votesCount}/${totalHintGivers}`;
+          toggle.textContent = playerHasVoted
+            ? `Undo eliminate (${voteLabel})`
+            : `Eliminate (${voteLabel})`;
+          toggle.disabled = totalHintGivers === 0;
+          toggle.addEventListener('click', () => toggleHintVote(hint));
           li.appendChild(toggle);
+        }
+
+        if (player.role === 'hint') {
+          const voteStatus = document.createElement('div');
+          voteStatus.className = 'hint-vote-status';
+          if (totalHintGivers === 0) {
+            voteStatus.textContent = 'No other hint givers yet.';
+          } else if (votesCount === totalHintGivers) {
+            voteStatus.textContent = 'All hint givers voted to eliminate.';
+          } else if (votesCount === 0) {
+            voteStatus.textContent = 'No eliminate votes yet.';
+          } else {
+            const voters = votes
+              .map(id => getPlayerName(id))
+              .filter(Boolean);
+            const voterList = voters.length ? ` (${voters.join(', ')})` : '';
+            voteStatus.textContent = `${votesCount}/${totalHintGivers} hint givers voted${voterList}.`;
+          }
+          li.appendChild(voteStatus);
         }
 
         if (stage === 'awaiting_guess' && player.role === 'guesser') {
@@ -1396,6 +1454,110 @@ function renderRound() {
   }
 }
 
+function renderHintChat() {
+  if (!hintChatSection || !hintChatMessages || !hintChatStatus) return;
+  const round = serverState?.round ?? null;
+  const roundId = round?.id ?? null;
+
+  if (roundId !== lastRenderedChatRoundId) {
+    lastRenderedChatRoundId = roundId;
+    hintChatAutoScroll = true;
+  }
+
+  if (!player || player.role !== 'hint' || !round) {
+    hintChatSection.classList.add('hidden');
+    hintChatStatus.textContent = '';
+    if (hintChatMessages) {
+      hintChatMessages.innerHTML = '';
+    }
+    return;
+  }
+
+  hintChatSection.classList.remove('hidden');
+
+  const stage = round.stage;
+  const messages = Array.isArray(round.chatMessages) ? round.chatMessages : [];
+  const canChat = canUseHintChat();
+
+  const statusText = (() => {
+    switch (stage) {
+      case 'collecting_hints':
+        return 'Coordinate before sharing your clues.';
+      case 'reviewing_hints':
+        return 'Agree on collisions before reveal.';
+      case 'awaiting_guess':
+        return 'Chat paused while the guesser decides.';
+      case 'round_result':
+        return 'Chat closed until the next round.';
+      default:
+        return '';
+    }
+  })();
+  hintChatStatus.textContent = statusText;
+
+  if (hintChatInput) {
+    hintChatInput.disabled = !canChat;
+    hintChatInput.placeholder = canChat
+      ? 'Discuss collisions here…'
+      : 'Chat closed for this stage';
+  }
+
+  if (hintChatForm) {
+    const submitButton = hintChatForm.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.disabled = !canChat;
+    }
+  }
+
+  hintChatMessages.innerHTML = '';
+
+  messages.forEach(message => {
+    const isSelf = player && message.playerId === player.id;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'hint-chat-message';
+    if (isSelf) {
+      wrapper.classList.add('self');
+    }
+
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'hint-chat-avatar';
+    avatarEl.textContent = message.avatar || '🙂';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'hint-chat-bubble';
+
+    const authorLine = document.createElement('div');
+    authorLine.className = 'hint-chat-author';
+    authorLine.textContent = message.name || 'Hint giver';
+    if (message.createdAt) {
+      const time = document.createElement('span');
+      time.className = 'hint-chat-time';
+      time.textContent = formatChatTimestamp(message.createdAt);
+      authorLine.appendChild(time);
+    }
+    bubble.appendChild(authorLine);
+
+    const textEl = document.createElement('div');
+    textEl.className = 'hint-chat-text';
+    textEl.textContent = message.text;
+    bubble.appendChild(textEl);
+
+    if (isSelf) {
+      wrapper.appendChild(bubble);
+      wrapper.appendChild(avatarEl);
+    } else {
+      wrapper.appendChild(avatarEl);
+      wrapper.appendChild(bubble);
+    }
+
+    hintChatMessages.appendChild(wrapper);
+  });
+
+  if (hintChatAutoScroll) {
+    hintChatMessages.scrollTop = hintChatMessages.scrollHeight;
+  }
+}
+
 async function startRound() {
   if (!player) return;
   try {
@@ -1438,9 +1600,35 @@ async function submitHint(text) {
   showMessage('Hint submitted.');
 }
 
-async function toggleHint(hint) {
+async function handleHintChatSubmit(event) {
+  event.preventDefault();
+  if (!player || !hintChatInput) return;
+  const canChat = canUseHintChat();
+  if (!canChat) {
+    showMessage('Chat is available while clues are being prepared.', 'error');
+    return;
+  }
+  const text = hintChatInput.value.trim();
+  if (!text) {
+    return;
+  }
+  try {
+    await apiPost('/api/round/chat', {
+      playerId: player.id,
+      text
+    });
+    hintChatInput.value = '';
+    hintChatAutoScroll = true;
+  } catch (err) {
+    // message shown by apiPost
+  }
+}
+
+async function toggleHintVote(hint) {
   if (!player) return;
-  await apiPost(`/api/hints/${hint.id}/mark`, { playerId: player.id, invalid: !hint.invalid });
+  const votes = Array.isArray(hint.eliminationVotes) ? new Set(hint.eliminationVotes) : new Set();
+  const hasVoted = votes.has(player.id);
+  await apiPost(`/api/hints/${hint.id}/mark`, { playerId: player.id, invalid: !hasVoted });
 }
 
 function buildButton(label, handler, disabled = false) {
@@ -1792,6 +1980,37 @@ function syncSettingsFromServer() {
 
 function canEditSettings() {
   return Boolean(player) && !serverState?.round;
+}
+
+function canUseHintChat() {
+  if (!player || player.role !== 'hint') return false;
+  const round = serverState?.round;
+  if (!round) return false;
+  return round.stage === 'collecting_hints' || round.stage === 'reviewing_hints';
+}
+
+function getHintGiverCount() {
+  if (typeof serverState?.hintGiverCount === 'number') {
+    return serverState.hintGiverCount;
+  }
+  if (!Array.isArray(serverState?.players)) return 0;
+  return serverState.players.filter(p => p.role === 'hint').length;
+}
+
+function getPlayerName(id) {
+  if (!Array.isArray(serverState?.players)) return null;
+  const record = serverState.players.find(p => p.id === id);
+  return record ? record.name : null;
+}
+
+function formatChatTimestamp(value) {
+  const time = Number(value);
+  if (!Number.isFinite(time)) return '';
+  try {
+    return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (err) {
+    return '';
+  }
 }
 
 async function handleEndGameToggle() {
