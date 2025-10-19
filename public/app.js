@@ -293,7 +293,7 @@ function renderPlayerInfo() {
         </select>
       </label>
     </div>
-    <button type="submit">Update</button>
+    <button type="submit" class="btn btn-primary">Update</button>
   `;
   form.addEventListener('submit', handleIdentitySubmit);
   playerInfo.appendChild(form);
