@@ -128,6 +128,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/round/chat' && req.method === 'POST') {
     await handlePostChat(req, res);
     return;
+  }
+
   if (pathname === '/api/hints/typing' && req.method === 'POST') {
     await handleTypingHint(req, res);
     return;

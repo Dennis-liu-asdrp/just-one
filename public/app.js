@@ -2223,3 +2223,4 @@ function hasSeenInstructionsBefore() {
     return false;
   }
 }
+import { MiniFlappyGame } from './flappy.js';
