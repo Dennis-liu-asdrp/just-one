@@ -373,7 +373,8 @@ async function handleStartRound(req, res) {
       revealedAt: null,
       finishedAt: null,
       statsApplied: false,
-      number: state.roundsCompleted + 1
+      number: state.roundsCompleted + 1,
+      reviewLocks: new Set()
     };
 
     respond(res, 200, { roundId: state.round.id, wordAvailable: true });
@@ -400,6 +401,12 @@ async function handleSubmitHint(req, res) {
 
     if (player.role !== 'hint') {
       respond(res, 403, { error: 'Only hint-givers can submit hints' });
+      return;
+    }
+
+    const reviewLocks = getRoundReviewLockSet();
+    if (reviewLocks.has(player.id)) {
+      respond(res, 423, { error: 'Your hint is locked for review' });
       return;
     }
 
@@ -449,11 +456,6 @@ async function handleBeginReview(req, res) {
       return;
     }
 
-    if (state.round.hints.length === 0) {
-      respond(res, 400, { error: 'Submit at least one hint before review' });
-      return;
-    }
-
     const body = await readBody(req);
     const player = findPlayer(body.playerId);
     if (!player) {
@@ -466,9 +468,22 @@ async function handleBeginReview(req, res) {
       return;
     }
 
-    state.round.stage = 'reviewing_hints';
-    state.round.reviewStartedAt = Date.now();
-    respond(res, 200, { success: true });
+    const playerHint = state.round.hints.find(h => h.playerId === player.id);
+    if (!playerHint) {
+      respond(res, 400, { error: 'Submit a hint before reviewing collisions' });
+      return;
+    }
+
+    const reviewLocks = getRoundReviewLockSet();
+    const alreadyLocked = reviewLocks.has(player.id);
+    if (!alreadyLocked) {
+      reviewLocks.add(player.id);
+    }
+
+    const reviewStageChanged = maybeEnterReviewStage();
+    const readyToReview = state.round.stage === 'reviewing_hints' || reviewStageChanged;
+
+    respond(res, 200, { success: true, readyToReview, alreadyLocked });
     broadcastState();
   } catch (err) {
     respond(res, 400, { error: err.message });
@@ -612,6 +627,56 @@ async function handleGetWord(req, res, params) {
   } catch (err) {
     respond(res, 400, { error: err.message });
   }
+}
+
+function getRoundReviewLockSet(createIfMissing = true) {
+  if (!state.round) return new Set();
+  const current = state.round.reviewLocks;
+  if (current instanceof Set) {
+    return current;
+  }
+  if (Array.isArray(current)) {
+    const set = new Set(current);
+    if (createIfMissing) {
+      state.round.reviewLocks = set;
+    }
+    return set;
+  }
+  if (!current) {
+    if (createIfMissing) {
+      const set = new Set();
+      state.round.reviewLocks = set;
+      return set;
+    }
+    return new Set();
+  }
+  const set = new Set(Array.from(current));
+  if (createIfMissing) {
+    state.round.reviewLocks = set;
+  }
+  return set;
+}
+
+function allHintGiversLocked() {
+  if (!state.round) return false;
+  const locks = getRoundReviewLockSet(false);
+  if (locks.size === 0) return false;
+  const hintPlayers = state.players.filter(p => p.role === 'hint');
+  if (hintPlayers.length === 0) return false;
+  return hintPlayers.every(player => {
+    const contributed = state.round.hints.some(hint => hint.playerId === player.id);
+    return contributed && locks.has(player.id);
+  });
+}
+
+function maybeEnterReviewStage() {
+  if (!state.round) return false;
+  if (state.round.stage !== 'collecting_hints') return false;
+  if (!state.round.hints.length) return false;
+  if (!allHintGiversLocked()) return false;
+  state.round.stage = 'reviewing_hints';
+  state.round.reviewStartedAt = Date.now();
+  return true;
 }
 
 async function handleLeave(req, res) {
@@ -841,6 +906,9 @@ function removePlayer(playerId) {
   state.endGameVotes.delete(playerId);
   if (state.round) {
     state.round.hints = state.round.hints.filter(h => h.playerId !== playerId);
+    const locks = getRoundReviewLockSet();
+    locks.delete(playerId);
+    maybeEnterReviewStage();
     if (state.round.guess && state.round.guess.playerId === playerId) {
       state.round.guess = null;
     }
@@ -929,6 +997,7 @@ function serializeState() {
           invalid: hint.invalid,
           avatar: hint.avatar || getPlayerAvatar(hint.playerId)
         })),
+        reviewLocks: Array.from(getRoundReviewLockSet(false)),
         guess: state.round.guess
           ? {
               playerId: state.round.guess.playerId,

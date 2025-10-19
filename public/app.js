@@ -1005,7 +1005,15 @@ function renderControls() {
   switch (round.stage) {
     case 'collecting_hints':
       if (player.role === 'hint') {
-        controlsEl.appendChild(buildButton('Review collisions', () => beginReview(), round.hints.length === 0));
+        const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
+        const playerLocked = reviewLocks.includes(player.id);
+        const playerHint = round.hints.find(h => h.playerId === player.id);
+        if (playerLocked) {
+          setControlsMessage('Hint locked. Waiting for other hint givers to review collisions.');
+        } else {
+          const button = buildButton('Review collisions', () => beginReview(), !playerHint);
+          controlsEl.appendChild(button);
+        }
       } else {
         setControlsMessage('Hints are being prepared.');
       }
@@ -1092,6 +1100,8 @@ function renderRound() {
   }
 
   const stage = round.stage;
+  const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
+  const playerLocked = player.role === 'hint' && reviewLocks.includes(player.id);
 
   if (round.hints.length > 0) {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
@@ -1107,7 +1117,8 @@ function renderRound() {
       const list = document.createElement('ul');
       list.className = 'hint-list';
 
-      const canSeeText = player.role === 'hint'
+      const hintPlayerCanSeeText = player.role === 'hint' && stage !== 'collecting_hints';
+      const canSeeText = hintPlayerCanSeeText
         || stage === 'round_result'
         || (player.role === 'guesser' && stage === 'awaiting_guess');
 
@@ -1196,19 +1207,34 @@ function renderRound() {
       <button type="submit">Submit clue</button>
     `;
     const textarea = form.querySelector('textarea');
+    const submitButton = form.querySelector('button[type="submit"]');
     if (existing) {
       textarea.value = existing.text;
     }
-    form.addEventListener('submit', async evt => {
-      evt.preventDefault();
-      const value = textarea.value.trim();
-      if (!value) {
-        showMessage('Clue cannot be empty.', 'error');
-        return;
+    if (playerLocked) {
+      textarea.readOnly = true;
+      textarea.classList.add('is-readonly');
+      if (submitButton) {
+        submitButton.disabled = true;
       }
-      await submitHint(value);
-    });
+    } else {
+      form.addEventListener('submit', async evt => {
+        evt.preventDefault();
+        const value = textarea.value.trim();
+        if (!value) {
+          showMessage('Clue cannot be empty.', 'error');
+          return;
+        }
+        await submitHint(value);
+      });
+    }
     roundEl.appendChild(form);
+    if (playerLocked) {
+      const notice = document.createElement('div');
+      notice.className = 'info-card subtle';
+      notice.textContent = 'Your hint is locked. Waiting for other hint givers.';
+      roundEl.appendChild(notice);
+    }
   }
 
   if (round.stage === 'round_result') {
@@ -1280,7 +1306,12 @@ async function startRound() {
 async function beginReview() {
   if (!player) return;
   try {
-    await apiPost('/api/round/begin-review', { playerId: player.id });
+    const result = await apiPost('/api/round/begin-review', { playerId: player.id });
+    if (result?.readyToReview) {
+      showMessage('All hint givers are now reviewing collisions.');
+    } else if (!result?.alreadyLocked) {
+      showMessage('Hint locked. Waiting for other hint givers.');
+    }
   } catch (err) {}
 }
 
