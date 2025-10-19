@@ -33,6 +33,9 @@ const avatarPickerButton = document.getElementById('avatar-picker-button');
 const avatarPickerCurrent = document.getElementById('avatar-picker-current');
 const avatarModal = document.getElementById('avatar-modal');
 const avatarModalClose = document.getElementById('avatar-modal-close');
+const instructionsButton = document.getElementById('instructions-button');
+const instructionsModal = document.getElementById('instructions-modal');
+const instructionsModalClose = document.getElementById('instructions-modal-close');
 
 let leaderboardView = 'room';
 
@@ -42,6 +45,7 @@ const fallbackAvatars = [
   '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
 ];
 const defaultAvatar = '🙂';
+const INSTRUCTIONS_STORAGE_KEY = 'just-one-instructions-seen';
 
 let player = null;
 let serverState = null;
@@ -64,6 +68,8 @@ let currentSettings = {
 let availableAvatars = [...fallbackAvatars];
 let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
+let instructionsModalOpen = false;
+let shouldAutoOpenInstructions = !hasSeenInstructionsBefore();
 
 init();
 
@@ -87,11 +93,13 @@ function init() {
   }
   setupSettings();
   setupAvatarPicker();
+  setupInstructions();
   restorePlayer().catch(err => {
     console.warn('Failed to restore player', err);
   });
   openEventStream();
   setupButtonFeedback();
+  maybeAutoOpenInstructions();
   renderSettingsButtonState();
 }
 
@@ -121,6 +129,32 @@ function setupAvatarPicker() {
 
   if (avatarModalClose) {
     avatarModalClose.addEventListener('click', () => closeAvatarModal());
+  }
+}
+
+function setupInstructions() {
+  if (!instructionsButton || !instructionsModal) {
+    shouldAutoOpenInstructions = false;
+    return;
+  }
+  instructionsButton.title = 'How to play';
+  instructionsButton.addEventListener('click', () => {
+    if (instructionsModalOpen) {
+      closeInstructionsModal();
+    } else {
+      openInstructionsModal();
+    }
+  });
+
+  instructionsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'instructions-modal') {
+      closeInstructionsModal();
+    }
+  });
+
+  if (instructionsModalClose) {
+    instructionsModalClose.addEventListener('click', () => closeInstructionsModal());
   }
 }
 
@@ -257,6 +291,74 @@ function handleAvatarModalKeydown(event) {
   }
 }
 
+function openInstructionsModal() {
+  if (!instructionsModal || instructionsModalOpen) return;
+  instructionsModal.classList.remove('hidden');
+  instructionsModal.classList.remove('is-hiding');
+  window.requestAnimationFrame(() => {
+    instructionsModal.classList.add('is-visible');
+  });
+  instructionsModalOpen = true;
+  shouldAutoOpenInstructions = false;
+  if (instructionsButton) {
+    instructionsButton.setAttribute('aria-expanded', 'true');
+  }
+  document.addEventListener('keydown', handleInstructionsKeydown);
+  if (instructionsModalClose) {
+    instructionsModalClose.focus({ preventScroll: true });
+  }
+}
+
+function closeInstructionsModal(force = false) {
+  if (!instructionsModal) return;
+  if (!instructionsModalOpen && !force) return;
+
+  if (force && !instructionsModalOpen) {
+    instructionsModal.classList.add('hidden');
+    instructionsModal.classList.remove('is-visible');
+    instructionsModal.classList.remove('is-hiding');
+    return;
+  }
+
+  instructionsModal.classList.remove('is-visible');
+  if (force) {
+    instructionsModal.classList.add('hidden');
+    instructionsModal.classList.remove('is-hiding');
+  } else {
+    instructionsModal.classList.add('is-hiding');
+    window.setTimeout(() => {
+      if (!instructionsModalOpen) {
+        instructionsModal.classList.add('hidden');
+        instructionsModal.classList.remove('is-hiding');
+      }
+    }, 220);
+  }
+  instructionsModalOpen = false;
+  shouldAutoOpenInstructions = false;
+  markInstructionsSeen();
+  if (instructionsButton) {
+    instructionsButton.setAttribute('aria-expanded', 'false');
+    if (!force) {
+      instructionsButton.focus({ preventScroll: true });
+    }
+  }
+  document.removeEventListener('keydown', handleInstructionsKeydown);
+}
+
+function handleInstructionsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeInstructionsModal();
+  }
+}
+
+function maybeAutoOpenInstructions() {
+  if (!shouldAutoOpenInstructions) return;
+  if (instructionsModalOpen) return;
+  if (player) return;
+
+  openInstructionsModal();
+}
 function setupSettings() {
   if (!settingsButton || !settingsModal) return;
   settingsButton.addEventListener('click', () => {
@@ -495,6 +597,7 @@ function updateLayout() {
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
     renderLeaderboard();
+    maybeAutoOpenInstructions();
     renderRoundProgress();
     renderEndGameControls();
     renderSettingsButtonState();
@@ -1071,7 +1174,7 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
-  }
+    }
   } else if (player.role === 'guesser' && stage !== 'round_result') {
     const placeholder = document.createElement('div');
     placeholder.className = 'info-card subtle';
@@ -1742,11 +1845,27 @@ function arraysEqual(a, b) {
 }
 
 function escapeHtml(value) {
-  const str = String(value ?? '')
+  const str = String(value ?? '');
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function markInstructionsSeen() {
+  try {
+    localStorage.setItem(INSTRUCTIONS_STORAGE_KEY, 'true');
+  } catch (err) {
+    // Ignore storage errors (private mode, etc.).
+  }
+}
+
+function hasSeenInstructionsBefore() {
+  try {
+    return localStorage.getItem(INSTRUCTIONS_STORAGE_KEY) === 'true';
+  } catch (err) {
+    return false;
+  }
 }
