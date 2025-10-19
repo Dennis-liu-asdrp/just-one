@@ -21,6 +21,19 @@ const words = [
   'Pinnacle','Quest','Reverie','Serenade','Timber','Udon','Verdict','Wingman','Yearbook','Zenith'
 ];
 
+const allowedAvatars = Object.freeze([
+  '🦊','🐼','🐸','🦄','🐝','🐢','🐧','🦁','🐙','🐨',
+  '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
+  '🐤','🦉','🦋','🐞','🐬','🐳','🐠','🦈','🐲','🦖'
+]);
+const defaultAvatar = '🙂';
+
+function normalizeAvatar(value) {
+  if (typeof value !== 'string') return defaultAvatar;
+  if (value === defaultAvatar) return defaultAvatar;
+  return allowedAvatars.includes(value) ? value : defaultAvatar;
+}
+
 const state = {
   players: [],
   round: null,
@@ -231,6 +244,7 @@ async function handleJoin(req, res) {
     const playerId = body.playerId || null;
     const name = (body.name || '').trim();
     const role = body.role === 'guesser' ? 'guesser' : 'hint';
+    const avatar = normalizeAvatar(body.avatar);
 
     if (!name) {
       respond(res, 400, { error: 'Name is required' });
@@ -251,7 +265,9 @@ async function handleJoin(req, res) {
       }
       player.name = name;
       player.role = role;
+      player.avatar = avatar;
       player.lastSeenAt = Date.now();
+      applyAvatarToHints(player.id, player.avatar);
     } else {
       if (role === 'guesser' && roleIsTaken('guesser')) {
         respond(res, 409, { error: 'A guesser is already active' });
@@ -261,6 +277,7 @@ async function handleJoin(req, res) {
         id: randomUUID(),
         name,
         role,
+        avatar,
         joinedAt: Date.now(),
         lastSeenAt: Date.now()
       };
@@ -370,6 +387,7 @@ async function handleSubmitHint(req, res) {
     if (existing) {
       existing.text = text;
       existing.updatedAt = Date.now();
+      existing.avatar = player.avatar || defaultAvatar;
     } else {
       state.round.hints.push({
         id: randomUUID(),
@@ -377,6 +395,7 @@ async function handleSubmitHint(req, res) {
         author: player.name,
         text,
         invalid: false,
+        avatar: player.avatar || defaultAvatar,
         submittedAt: Date.now(),
         updatedAt: Date.now()
       });
@@ -481,6 +500,7 @@ async function handleGuess(req, res) {
     state.round.guess = {
       playerId: player.id,
       playerName: player.name,
+      avatar: player.avatar || defaultAvatar,
       text,
       correct,
       submittedAt: Date.now()
@@ -659,6 +679,20 @@ function touchPlayer(player) {
   }
 }
 
+function applyAvatarToHints(playerId, avatar) {
+  if (!state.round || !state.round.hints) return;
+  for (const hint of state.round.hints) {
+    if (hint.playerId === playerId) {
+      hint.avatar = avatar;
+    }
+  }
+}
+
+function getPlayerAvatar(playerId) {
+  const player = findPlayer(playerId);
+  return player?.avatar || defaultAvatar;
+}
+
 function shuffle(list) {
   const array = [...list];
   for (let i = array.length - 1; i > 0; i -= 1) {
@@ -698,12 +732,14 @@ function serializeState() {
           playerId: hint.playerId,
           author: hint.author,
           text: hint.text,
-          invalid: hint.invalid
+          invalid: hint.invalid,
+          avatar: hint.avatar || getPlayerAvatar(hint.playerId)
         })),
         guess: state.round.guess
           ? {
               playerId: state.round.guess.playerId,
               playerName: state.round.guess.playerName,
+              avatar: state.round.guess.avatar || getPlayerAvatar(state.round.guess.playerId),
               text: state.round.guess.text,
               correct: state.round.guess.correct
             }
@@ -722,7 +758,8 @@ function serializeState() {
     players: state.players.map(player => ({
       id: player.id,
       name: player.name,
-      role: player.role
+      role: player.role,
+      avatar: player.avatar || defaultAvatar
     })),
     round,
     score: state.score,
@@ -730,6 +767,7 @@ function serializeState() {
     settings: {
       difficulty: state.settings.difficulty
     }
+    availableAvatars: allowedAvatars
   };
 }
 
@@ -777,6 +815,7 @@ function looksLikeCompoundWord(word) {
 function syncPlayerStats(playerId, name) {
   const stats = getPlayerStats(playerId, name);
   stats.name = name;
+  stats.avatar = getPlayerAvatar(playerId);
   stats.lastUpdatedAt = Date.now();
 }
 
@@ -794,6 +833,7 @@ function getPlayerStats(playerId, name = 'Unknown hint-giver') {
       roundsParticipated: 0,
       successfulRounds: 0,
       bestHints: [],
+      avatar: defaultAvatar,
       lastUpdatedAt: Date.now()
     };
     playerStats.set(playerId, stats);
@@ -825,6 +865,8 @@ function applyRoundToStats(round) {
     } else {
       stats.hintsKept += 1;
     }
+
+    stats.avatar = hint.avatar || getPlayerAvatar(hint.playerId);
 
     const usefulness = guessCorrect && !hint.invalid ? 1 : 0;
     stats.usefulnessSum += usefulness;
@@ -880,6 +922,7 @@ function buildLeaderboard() {
     return {
       playerId: stats.playerId,
       name: stats.name,
+      avatar: stats.avatar || defaultAvatar,
       metrics,
       totals: {
         hintsGiven: stats.hintsGiven,
