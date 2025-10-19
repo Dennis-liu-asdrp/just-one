@@ -98,7 +98,11 @@ const guessTypingState = {
 const guessDraft = {
   roundId: null,
   stage: null,
-  value: ''
+  value: '',
+  shouldFocus: false,
+  selectionStart: 0,
+  selectionEnd: 0,
+  selectionDirection: 'none'
 };
 
 init();
@@ -1038,10 +1042,21 @@ function stopGuessTypingImmediate({ notify = false } = {}) {
   }
 }
 
+function updateGuessDraftSelection(input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  guessDraft.selectionStart = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+  guessDraft.selectionEnd = typeof input.selectionEnd === 'number' ? input.selectionEnd : guessDraft.selectionStart;
+  guessDraft.selectionDirection = typeof input.selectionDirection === 'string' ? input.selectionDirection : 'none';
+}
+
 function resetGuessDraft() {
   guessDraft.roundId = null;
   guessDraft.stage = null;
   guessDraft.value = '';
+  guessDraft.shouldFocus = false;
+  guessDraft.selectionStart = 0;
+  guessDraft.selectionEnd = 0;
+  guessDraft.selectionDirection = 'none';
 }
 
 async function sendHintTypingState(active) {
@@ -1278,9 +1293,16 @@ function renderControls() {
   const guessSelection = shouldRestoreGuessFocus
     ? {
         start: typeof activeElement.selectionStart === 'number' ? activeElement.selectionStart : activeElement.value.length,
-        end: typeof activeElement.selectionEnd === 'number' ? activeElement.selectionEnd : activeElement.value.length
+        end: typeof activeElement.selectionEnd === 'number' ? activeElement.selectionEnd : activeElement.value.length,
+        direction: typeof activeElement.selectionDirection === 'string' ? activeElement.selectionDirection : 'none'
       }
     : null;
+  if (shouldRestoreGuessFocus) {
+    guessDraft.shouldFocus = true;
+    guessDraft.selectionStart = guessSelection.start;
+    guessDraft.selectionEnd = guessSelection.end;
+    guessDraft.selectionDirection = guessSelection.direction;
+  }
 
   controlsEl.innerHTML = '';
   if (!player || !serverState) return;
@@ -1304,6 +1326,10 @@ function renderControls() {
     startButton.disabled = Boolean(game?.gameOver);
     controlsEl.appendChild(startButton);
     return;
+  }
+
+  if (player.role !== 'guesser' || round.stage !== 'awaiting_guess') {
+    guessDraft.shouldFocus = false;
   }
 
   switch (round.stage) {
@@ -1331,6 +1357,7 @@ function renderControls() {
       break;
     case 'awaiting_guess':
       if (player.role === 'guesser') {
+        guessDraft.shouldFocus = guessDraft.shouldFocus || shouldRestoreGuessFocus;
         const form = document.createElement('form');
         form.className = 'guess-form';
         const roundIdentifier = round.id ?? null;
@@ -1349,13 +1376,27 @@ function renderControls() {
         }
         if (guessInput) {
           guessInput.value = guessDraft.value;
+          guessInput.addEventListener('focus', () => {
+            guessDraft.shouldFocus = true;
+            updateGuessDraftSelection(guessInput);
+          });
           guessInput.addEventListener('input', () => {
             guessDraft.roundId = roundIdentifier;
             guessDraft.stage = 'awaiting_guess';
             guessDraft.value = guessInput.value;
+            updateGuessDraftSelection(guessInput);
             markGuessTypingActivity();
           });
-          guessInput.addEventListener('blur', () => stopGuessTypingImmediate({ notify: true }));
+          guessInput.addEventListener('keyup', () => {
+            updateGuessDraftSelection(guessInput);
+          });
+          guessInput.addEventListener('select', () => {
+            updateGuessDraftSelection(guessInput);
+          });
+          guessInput.addEventListener('blur', () => {
+            guessDraft.shouldFocus = false;
+            stopGuessTypingImmediate({ notify: true });
+          });
           if (shouldRestoreGuessFocus) {
             guessInput.focus({ preventScroll: true });
             if (guessSelection) {
@@ -1369,6 +1410,15 @@ function renderControls() {
                 } catch (err2) {}
               }
             }
+            updateGuessDraftSelection(guessInput);
+          } else if (guessDraft.shouldFocus) {
+            guessInput.focus({ preventScroll: true });
+            const start = typeof guessDraft.selectionStart === 'number' ? guessDraft.selectionStart : guessInput.value.length;
+            const end = typeof guessDraft.selectionEnd === 'number' ? guessDraft.selectionEnd : start;
+            try {
+              guessInput.setSelectionRange(start, end, guessDraft.selectionDirection);
+            } catch (err) {}
+            updateGuessDraftSelection(guessInput);
           }
         }
         form.addEventListener('submit', async evt => {
