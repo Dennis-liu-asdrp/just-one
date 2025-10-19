@@ -1301,6 +1301,20 @@ function renderLeaderboard() {
 }
 
 function renderControls() {
+  const activeElement = document.activeElement;
+  const shouldRestoreGuessFocus = Boolean(
+    activeElement &&
+    controlsEl.contains(activeElement) &&
+    activeElement instanceof HTMLInputElement &&
+    activeElement.name === 'guess'
+  );
+  const guessSelection = shouldRestoreGuessFocus
+    ? {
+        start: typeof activeElement.selectionStart === 'number' ? activeElement.selectionStart : activeElement.value.length,
+        end: typeof activeElement.selectionEnd === 'number' ? activeElement.selectionEnd : activeElement.value.length
+      }
+    : null;
+
   controlsEl.innerHTML = '';
   if (!player || !serverState) return;
 
@@ -1375,6 +1389,20 @@ function renderControls() {
             markGuessTypingActivity();
           });
           guessInput.addEventListener('blur', () => stopGuessTypingImmediate({ notify: true }));
+          if (shouldRestoreGuessFocus) {
+            guessInput.focus({ preventScroll: true });
+            if (guessSelection) {
+              const { start, end } = guessSelection;
+              try {
+                guessInput.setSelectionRange(start, end);
+              } catch (err) {
+                const cursor = guessInput.value.length;
+                try {
+                  guessInput.setSelectionRange(cursor, cursor);
+                } catch (err2) {}
+              }
+            }
+          }
         }
         form.addEventListener('submit', async evt => {
           evt.preventDefault();
