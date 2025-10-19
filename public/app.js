@@ -1007,14 +1007,14 @@ function renderControls() {
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Review collisions', () => beginReview(), round.hints.length === 0));
       } else {
-        setControlsMessage('Hints are being prepared.');
+        setControlsMessage('Hint team is submitting clues.');
       }
       break;
     case 'reviewing_hints':
       if (player.role === 'hint') {
         controlsEl.appendChild(buildButton('Reveal valid clues to guesser', () => revealClues()));
-      } else {
-        setControlsMessage('Hint givers are resolving collisions.');
+      } else if (player.role !== 'guesser') {
+        setControlsMessage('Hint team is resolving collisions.');
       }
       break;
     case 'awaiting_guess':
@@ -1040,8 +1040,10 @@ function renderControls() {
           form.reset();
         });
         controlsEl.appendChild(form);
-      } else {
+      } else if (player.role !== 'hint') {
         setControlsMessage('Waiting for the guesser to decide.');
+      } else {
+        controlsEl.innerHTML = '';
       }
       break;
     case 'round_result': {
@@ -1097,12 +1099,12 @@ function renderRound() {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
 
     if (guesserWaiting) {
-      const message = document.createElement('div');
-      message.className = 'info-card subtle';
-      message.textContent = stage === 'reviewing_hints'
-        ? 'Hint givers are reviewing collisions. Hang tight!'
-        : 'Hint givers are preparing their clues.';
-      roundEl.appendChild(message);
+      if (stage === 'reviewing_hints') {
+        const message = document.createElement('div');
+        message.className = 'info-card subtle';
+        message.textContent = 'Hint team is wrapping up their review.';
+        roundEl.appendChild(message);
+      }
     } else {
       const list = document.createElement('ul');
       list.className = 'hint-list';
@@ -1175,13 +1177,6 @@ function renderRound() {
 
       roundEl.appendChild(list);
     }
-  } else if (player.role === 'guesser' && stage !== 'round_result') {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'info-card subtle';
-    placeholder.textContent = stage === 'reviewing_hints'
-      ? 'Hint givers are reviewing clues before revealing them.'
-      : 'Waiting for hint givers to submit their clues.';
-    roundEl.appendChild(placeholder);
   }
 
   if (round.stage === 'collecting_hints' && player.role === 'hint') {
@@ -1320,13 +1315,13 @@ function buildButton(label, handler, disabled = false) {
 function formatStage(stage) {
   switch (stage) {
     case 'collecting_hints':
-      return 'Stage: Collecting hints';
+      return 'Collecting hints';
     case 'reviewing_hints':
-      return 'Stage: Reviewing collisions';
+      return 'Reviewing collisions';
     case 'awaiting_guess':
-      return 'Stage: Awaiting guess';
+      return 'Guess in progress';
     case 'round_result':
-      return 'Stage: Round result';
+      return 'Round result';
     default:
       return 'Waiting to start';
   }
