@@ -288,6 +288,7 @@ async function handleStartRound(req, res) {
       createdAt: Date.now(),
       startedBy: player.id,
       hints: [],
+      readyHintGivers: [],
       guess: null,
       revealedAt: null,
       finishedAt: null
@@ -326,10 +327,17 @@ async function handleSubmitHint(req, res) {
       return;
     }
 
+    const readySet = Array.isArray(state.round.readyHintGivers) ? state.round.readyHintGivers : [];
+    if (readySet.includes(player.id)) {
+      respond(res, 409, { error: 'Your hint is locked for review' });
+      return;
+    }
+
     const existing = state.round.hints.find(h => h.playerId === player.id);
     if (existing) {
       existing.text = text;
       existing.updatedAt = Date.now();
+      existing.locked = false;
     } else {
       state.round.hints.push({
         id: randomUUID(),
@@ -337,6 +345,7 @@ async function handleSubmitHint(req, res) {
         author: player.name,
         text,
         invalid: false,
+        locked: false,
         submittedAt: Date.now(),
         updatedAt: Date.now()
       });
@@ -373,9 +382,25 @@ async function handleBeginReview(req, res) {
       return;
     }
 
-    state.round.stage = 'reviewing_hints';
-    state.round.reviewStartedAt = Date.now();
-    respond(res, 200, { success: true });
+    const round = state.round;
+    round.readyHintGivers = Array.isArray(round.readyHintGivers) ? round.readyHintGivers : [];
+
+    const hint = round.hints.find(h => h.playerId === player.id);
+    if (!hint) {
+      respond(res, 400, { error: 'Submit a hint before reviewing' });
+      return;
+    }
+
+    if (!round.readyHintGivers.includes(player.id)) {
+      round.readyHintGivers.push(player.id);
+    }
+
+    hint.locked = true;
+    hint.lockedAt = Date.now();
+
+    const advanced = advanceStageIfReady();
+
+    respond(res, 200, { success: true, reviewing: advanced });
     broadcastState();
   } catch (err) {
     respond(res, 400, { error: err.message });
@@ -553,6 +578,9 @@ function removePlayer(playerId) {
   state.players = state.players.filter(p => p.id !== playerId);
   if (state.round) {
     state.round.hints = state.round.hints.filter(h => h.playerId !== playerId);
+    if (Array.isArray(state.round.readyHintGivers)) {
+      state.round.readyHintGivers = state.round.readyHintGivers.filter(id => id !== playerId);
+    }
     if (state.round.guess && state.round.guess.playerId === playerId) {
       state.round.guess = null;
     }
@@ -565,7 +593,34 @@ function removePlayer(playerId) {
         state.round.guess = null;
       }
     }
+
+    if (state.round.stage === 'collecting_hints') {
+      advanceStageIfReady();
+    }
   }
+}
+
+function advanceStageIfReady() {
+  const round = state.round;
+  if (!round || round.stage !== 'collecting_hints') {
+    return false;
+  }
+
+  round.readyHintGivers = Array.isArray(round.readyHintGivers) ? round.readyHintGivers : [];
+
+  const hintGiverIds = state.players.filter(p => p.role === 'hint').map(p => p.id);
+  if (!hintGiverIds.length) {
+    return false;
+  }
+
+  const allReady = hintGiverIds.every(id => round.readyHintGivers.includes(id));
+  if (!allReady) {
+    return false;
+  }
+
+  round.stage = 'reviewing_hints';
+  round.reviewStartedAt = Date.now();
+  return true;
 }
 
 function touchPlayer(player) {
@@ -589,7 +644,8 @@ function serializeState() {
           playerId: hint.playerId,
           author: hint.author,
           text: hint.text,
-          invalid: hint.invalid
+          invalid: hint.invalid,
+          locked: Boolean(hint.locked)
         })),
         guess: state.round.guess
           ? {
@@ -601,7 +657,10 @@ function serializeState() {
           : null,
         revealedAt: state.round.revealedAt,
         finishedAt: state.round.finishedAt,
-        wordRevealed: state.round.stage === 'round_result'
+        wordRevealed: state.round.stage === 'round_result',
+        readyHintGivers: Array.isArray(state.round.readyHintGivers)
+          ? [...state.round.readyHintGivers]
+          : []
       }
     : null;
 
