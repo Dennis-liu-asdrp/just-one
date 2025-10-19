@@ -128,6 +128,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/guess/typing' && req.method === 'POST') {
+    await handleGuessTyping(req, res);
+    return;
+  }
+
   if (pathname === '/api/round/begin-review' && req.method === 'POST') {
     await handleBeginReview(req, res);
     return;
@@ -368,7 +373,8 @@ async function handleStartRound(req, res) {
       statsApplied: false,
       number: state.roundsCompleted + 1,
       reviewLocks: new Set(),
-      typingHints: new Set()
+      typingHints: new Set(),
+      guesserTyping: new Set()
     };
 
     respond(res, 200, { roundId: state.round.id, wordAvailable: true });
@@ -538,6 +544,49 @@ async function handleTypingHint(req, res) {
   }
 }
 
+async function handleGuessTyping(req, res) {
+  try {
+    if (!state.round) {
+      respond(res, 409, { error: 'No active round' });
+      return;
+    }
+
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    if (player.role !== 'guesser') {
+      respond(res, 403, { error: 'Only the guesser can set typing status' });
+      return;
+    }
+
+    const typing = Boolean(body.typing);
+    const typingSet = getRoundGuesserTypingSet();
+
+    if (state.round.stage !== 'awaiting_guess') {
+      typingSet.delete(player.id);
+      respond(res, 200, { success: true, typing: false });
+      broadcastState();
+      return;
+    }
+
+    if (typing) {
+      typingSet.add(player.id);
+    } else {
+      typingSet.delete(player.id);
+    }
+
+    respond(res, 200, { success: true, typing: typingSet.has(player.id) });
+    broadcastState();
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
 async function handleReveal(req, res) {
   try {
     if (!state.round || state.round.stage !== 'reviewing_hints') {
@@ -560,6 +609,7 @@ async function handleReveal(req, res) {
     state.round.stage = 'awaiting_guess';
     state.round.revealedAt = Date.now();
     getRoundTypingSet().clear();
+    getRoundGuesserTypingSet().clear();
 
     respond(res, 200, { success: true });
     broadcastState();
@@ -592,6 +642,8 @@ async function handleGuess(req, res) {
       respond(res, 400, { error: 'Guess text is required' });
       return;
     }
+
+    getRoundGuesserTypingSet().delete(player.id);
 
     const correct = text.toLowerCase() === state.round.word.toLowerCase();
     state.round.stage = 'round_result';
@@ -909,6 +961,8 @@ function removePlayer(playerId) {
     locks.delete(playerId);
     const typingHints = getRoundTypingSet(false);
     typingHints.delete(playerId);
+    const guesserTyping = getRoundGuesserTypingSet(false);
+    guesserTyping.delete(playerId);
     maybeEnterReviewStage();
     if (state.round.guess && state.round.guess.playerId === playerId) {
       state.round.guess = null;
@@ -1011,6 +1065,34 @@ function getRoundTypingSet(createIfMissing = true) {
   return set;
 }
 
+function getRoundGuesserTypingSet(createIfMissing = true) {
+  if (!state.round) return new Set();
+  const current = state.round.guesserTyping;
+  if (current instanceof Set) {
+    return current;
+  }
+  if (Array.isArray(current)) {
+    const set = new Set(current);
+    if (createIfMissing) {
+      state.round.guesserTyping = set;
+    }
+    return set;
+  }
+  if (!current) {
+    if (createIfMissing) {
+      const set = new Set();
+      state.round.guesserTyping = set;
+      return set;
+    }
+    return new Set();
+  }
+  const set = new Set(Array.from(current));
+  if (createIfMissing) {
+    state.round.guesserTyping = set;
+  }
+  return set;
+}
+
 function allHintGiversLocked() {
   if (!state.round) return false;
   const locks = getRoundReviewLockSet(false);
@@ -1079,6 +1161,7 @@ function serializeState() {
         })),
         reviewLocks: Array.from(getRoundReviewLockSet(false)),
         typingHints: Array.from(getRoundTypingSet(false)),
+        guesserTyping: Array.from(getRoundGuesserTypingSet(false)),
         guess: state.round.guess
           ? {
               playerId: state.round.guess.playerId,
