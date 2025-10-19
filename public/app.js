@@ -734,8 +734,10 @@ function renderControls() {
           form.reset();
         });
         controlsEl.appendChild(form);
-      } else {
+      } else if (player.role !== 'hint') {
         setControlsMessage('Waiting for the guesser to decide.');
+      } else {
+        controlsEl.innerHTML = '';
       }
       break;
     case 'round_result': {
