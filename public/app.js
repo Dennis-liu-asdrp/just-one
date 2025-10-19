@@ -84,6 +84,22 @@ const hintTypingState = {
   reported: false,
   timeoutId: null
 };
+const hintDraft = {
+  roundId: null,
+  value: '',
+  syncedValue: ''
+};
+const GUESS_TYPING_IDLE_DELAY = 1800;
+const guessTypingState = {
+  active: false,
+  reported: false,
+  timeoutId: null
+};
+const guessDraft = {
+  roundId: null,
+  stage: null,
+  value: ''
+};
 
 init();
 
@@ -503,6 +519,22 @@ function onStateChange() {
     stopHintTypingImmediate({ notify: true });
   }
 
+  if (!round || stage !== 'collecting_hints' || player?.role !== 'hint') {
+    resetHintDraft();
+  }
+
+  if (player?.role === 'guesser') {
+    if (!round || stage !== 'awaiting_guess') {
+      stopGuessTypingImmediate({ notify: true });
+    }
+  } else {
+    stopGuessTypingImmediate({ notify: true });
+  }
+
+  if (!round || stage !== 'awaiting_guess' || player?.role !== 'guesser') {
+    resetGuessDraft();
+  }
+
   if (player && serverState && !serverState.players.some(p => p.id === player.id)) {
     player = null;
     localStorage.removeItem('just-one-player');
@@ -778,6 +810,7 @@ function renderPlayerBadge(playerRecord, round = null) {
 
   const reviewLocks = Array.isArray(round?.reviewLocks) ? round.reviewLocks : [];
   const typingHints = Array.isArray(round?.typingHints) ? round.typingHints : [];
+  const guesserTyping = Array.isArray(round?.guesserTyping) ? round.guesserTyping : [];
   const isReady = reviewLocks.includes(playerRecord.id);
   if (isReady && playerRecord.role === 'hint') {
     pill.classList.add('is-ready');
@@ -800,13 +833,22 @@ function renderPlayerBadge(playerRecord, round = null) {
     pill.appendChild(indicator);
   }
 
-  const showTyping = Boolean(
+  const isHintTyping = Boolean(
     round &&
     playerRecord.role === 'hint' &&
     round.stage === 'collecting_hints' &&
     typingHints.includes(playerRecord.id) &&
     !reviewLocks.includes(playerRecord.id)
   );
+
+  const isGuesserTyping = Boolean(
+    round &&
+    playerRecord.role === 'guesser' &&
+    round.stage === 'awaiting_guess' &&
+    guesserTyping.includes(playerRecord.id)
+  );
+
+  const showTyping = isHintTyping || isGuesserTyping;
 
   if (showTyping) {
     pill.appendChild(buildTypingIndicator());
@@ -861,6 +903,50 @@ function stopHintTypingImmediate({ notify = false } = {}) {
   }
 }
 
+function resetHintDraft() {
+  hintDraft.roundId = null;
+  hintDraft.value = '';
+  hintDraft.syncedValue = '';
+}
+
+function markGuessTypingActivity() {
+  if (!player || player.role !== 'guesser') return;
+  const round = serverState?.round;
+  if (!round || round.stage !== 'awaiting_guess') return;
+  if (guessTypingState.timeoutId) {
+    window.clearTimeout(guessTypingState.timeoutId);
+    guessTypingState.timeoutId = null;
+  }
+  const wasActive = guessTypingState.active;
+  guessTypingState.active = true;
+  guessTypingState.timeoutId = window.setTimeout(() => {
+    guessTypingState.timeoutId = null;
+    guessTypingState.active = false;
+    void sendGuessTypingState(false);
+  }, GUESS_TYPING_IDLE_DELAY);
+  if (!wasActive || guessTypingState.reported !== true) {
+    void sendGuessTypingState(true);
+  }
+}
+
+function stopGuessTypingImmediate({ notify = false } = {}) {
+  if (guessTypingState.timeoutId) {
+    window.clearTimeout(guessTypingState.timeoutId);
+    guessTypingState.timeoutId = null;
+  }
+  const shouldNotify = notify || guessTypingState.active || guessTypingState.reported === true;
+  guessTypingState.active = false;
+  if (shouldNotify) {
+    void sendGuessTypingState(false);
+  }
+}
+
+function resetGuessDraft() {
+  guessDraft.roundId = null;
+  guessDraft.stage = null;
+  guessDraft.value = '';
+}
+
 async function sendHintTypingState(active) {
   if (!player) return;
   if (!serverState?.round) return;
@@ -870,6 +956,18 @@ async function sendHintTypingState(active) {
     hintTypingState.reported = active;
   } catch (err) {
     hintTypingState.reported = null;
+  }
+}
+
+async function sendGuessTypingState(active) {
+  if (!player) return;
+  if (!serverState?.round) return;
+  if (guessTypingState.reported === active) return;
+  try {
+    await apiPost('/api/guess/typing', { playerId: player.id, typing: active }, { silent: true });
+    guessTypingState.reported = active;
+  } catch (err) {
+    guessTypingState.reported = null;
   }
 }
 
@@ -1146,6 +1244,7 @@ function renderControls() {
       if (player.role === 'guesser') {
         const form = document.createElement('form');
         form.className = 'guess-form';
+        const roundIdentifier = round.id ?? null;
         form.innerHTML = `
           <label>
             <span>Your guess</span>
@@ -1153,16 +1252,46 @@ function renderControls() {
           </label>
           <button type="submit">Submit guess</button>
         `;
+        const guessInput = form.querySelector('input[name="guess"]');
+        if (guessDraft.roundId !== roundIdentifier || guessDraft.stage !== 'awaiting_guess') {
+          guessDraft.roundId = roundIdentifier;
+          guessDraft.stage = 'awaiting_guess';
+          guessDraft.value = '';
+        }
+        if (guessInput) {
+          guessInput.value = guessDraft.value;
+          guessInput.addEventListener('input', () => {
+            guessDraft.roundId = roundIdentifier;
+            guessDraft.stage = 'awaiting_guess';
+            guessDraft.value = guessInput.value;
+            markGuessTypingActivity();
+          });
+          guessInput.addEventListener('blur', () => stopGuessTypingImmediate({ notify: true }));
+        }
         form.addEventListener('submit', async evt => {
           evt.preventDefault();
-          const formData = new FormData(form);
-          const guess = (formData.get('guess') || '').toString().trim();
+          const guessValue = guessInput ? guessInput.value : '';
+          const guess = guessValue.trim();
           if (!guess) {
             showMessage('Enter a guess first.', 'error');
             return;
           }
-          await submitGuess(guess);
-          form.reset();
+          guessDraft.roundId = roundIdentifier;
+          guessDraft.stage = 'awaiting_guess';
+          guessDraft.value = guess;
+          stopGuessTypingImmediate({ notify: true });
+          try {
+            await submitGuess(guess);
+            guessDraft.value = '';
+            if (guessInput) {
+              guessInput.value = '';
+            }
+            form.reset();
+          } catch (err) {
+            if (guessInput) {
+              guessDraft.value = guessInput.value;
+            }
+          }
         });
         controlsEl.appendChild(form);
       } else if (player.role !== 'hint') {
@@ -1356,6 +1485,7 @@ function renderRound() {
     const form = document.createElement('form');
     form.className = 'clue-form';
     const existing = round.hints.find(h => h.playerId === player.id);
+    const roundIdentifier = round.id ?? null;
     form.innerHTML = `
       <label>
         <span>Your clue</span>
@@ -1365,9 +1495,30 @@ function renderRound() {
     `;
     const textarea = form.querySelector('textarea');
     const submitButton = form.querySelector('button[type="submit"]');
-    if (existing) {
-      textarea.value = existing.text;
+    if (!textarea) {
+      roundEl.appendChild(form);
+      return;
     }
+
+    const serverValue = existing ? (existing.text || '') : '';
+    if (hintDraft.roundId !== roundIdentifier) {
+      hintDraft.roundId = roundIdentifier;
+      hintDraft.syncedValue = serverValue;
+      hintDraft.value = serverValue;
+    } else if (existing) {
+      const wasSynced = hintDraft.value === hintDraft.syncedValue;
+      hintDraft.syncedValue = serverValue;
+      if (wasSynced) {
+        hintDraft.value = serverValue;
+      }
+    } else {
+      const wasSynced = hintDraft.value === hintDraft.syncedValue;
+      hintDraft.syncedValue = '';
+      if (wasSynced) {
+        hintDraft.value = '';
+      }
+    }
+    textarea.value = hintDraft.value;
     if (playerLocked) {
       textarea.readOnly = true;
       textarea.classList.add('is-readonly');
@@ -1378,16 +1529,27 @@ function renderRound() {
     } else {
       form.addEventListener('submit', async evt => {
         evt.preventDefault();
+        if (!textarea) return;
         const value = textarea.value.trim();
         if (!value) {
           showMessage('Clue cannot be empty.', 'error');
           return;
         }
+        hintDraft.roundId = roundIdentifier;
+        hintDraft.value = value;
         stopHintTypingImmediate({ notify: true });
         await submitHint(value);
+        hintDraft.syncedValue = value;
+        textarea.value = value;
       });
-      textarea.addEventListener('input', () => markHintTypingActivity());
-      textarea.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
+      if (textarea) {
+        textarea.addEventListener('input', () => {
+          hintDraft.roundId = roundIdentifier;
+          hintDraft.value = textarea.value;
+          markHintTypingActivity();
+        });
+        textarea.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
+      }
     }
     roundEl.appendChild(form);
     if (playerLocked) {
