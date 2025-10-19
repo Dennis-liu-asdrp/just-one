@@ -1041,7 +1041,7 @@ button.pulse {
 
 .leaderboard-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.75rem;
   background: #fff;
@@ -1097,18 +1097,6 @@ button.pulse {
 
 .leaderboard-metric strong {
   font-weight: 600;
-}
-
-.leaderboard-score {
-  font-weight: 700;
-  color: #1f2d60;
-}
-
-.leaderboard-score span {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: #5c6590;
 }
 
 .personal-stats {
@@ -1217,15 +1205,6 @@ button.pulse {
   .leaderboard-row {
     grid-template-columns: 1fr;
     text-align: left;
-  }
-
-  .leaderboard-score {
-    justify-self: flex-start;
-  }
-
-  .leaderboard-score span {
-    display: inline;
-    margin-left: 0.35rem;
   }
 }
 

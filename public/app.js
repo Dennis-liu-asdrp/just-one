@@ -1016,7 +1016,6 @@ function renderLeaderboard() {
         li.classList.add('is-self');
       }
       const metrics = entry.metrics || {};
-      const scoreValue = formatMetricValue(metrics.playerScore ?? entry.playerScore);
       const avatarSymbol = escapeHtml(entry.avatar || defaultAvatar);
       li.innerHTML = `
         <div class="leaderboard-rank">#${index + 1}</div>
@@ -1032,7 +1031,6 @@ function renderLeaderboard() {
             ${renderLeaderboardMetric('🔁', 'Elimination Frequency', metrics.ef)}
           </div>
         </div>
-        <div class="leaderboard-score">${scoreValue}<span>PlayerScore</span></div>
       `;
       leaderboardList.appendChild(li);
     });
