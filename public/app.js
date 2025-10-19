@@ -10,10 +10,15 @@ const playersEl = document.getElementById('players');
 const controlsEl = document.getElementById('controls');
 const roundEl = document.getElementById('round');
 const messagesEl = document.getElementById('messages');
+const roundProgressEl = document.getElementById('round-progress');
+const endGameButton = document.getElementById('end-game-button');
+const endGameStatus = document.getElementById('end-game-status');
+const resetGameButton = document.getElementById('reset-game-button');
 const settingsButton = document.getElementById('settings-button');
 const settingsModal = document.getElementById('settings-modal');
 const settingsModalClose = document.getElementById('settings-modal-close');
 const settingsForm = document.getElementById('settings-form');
+const settingsTotalRoundsInput = document.getElementById('settings-total-rounds');
 const difficultyInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-difficulty"]')) : [];
 const roleInputs = settingsForm ? Array.from(settingsForm.querySelectorAll('input[name="setting-role"]')) : [];
 const roleWarningEl = document.getElementById('role-warning');
@@ -49,9 +54,13 @@ let buttonFeedbackInitialized = false;
 let audioContext = null;
 let settingsModalOpen = false;
 let shouldAutoOpenSettings = false;
-let currentSettings = { difficulty: 'easy' };
 let roleWarningTimeout = null;
 let roleWarningClearTimeout = null;
+let currentSettings = {
+  totalRounds: 10,
+  maxRounds: 20,
+  difficulty: 'easy'
+};
 let availableAvatars = [...fallbackAvatars];
 let selectedAvatar = defaultAvatar;
 let avatarModalOpen = false;
@@ -70,6 +79,12 @@ function init() {
       renderLeaderboard();
     });
   });
+  if (endGameButton) {
+    endGameButton.addEventListener('click', handleEndGameToggle);
+  }
+  if (resetGameButton) {
+    resetGameButton.addEventListener('click', handleResetGame);
+  }
   setupSettings();
   setupAvatarPicker();
   restorePlayer().catch(err => {
@@ -242,6 +257,44 @@ function handleAvatarModalKeydown(event) {
   }
 }
 
+function setupSettings() {
+  if (!settingsButton || !settingsModal) return;
+  settingsButton.addEventListener('click', () => {
+    if (settingsModalOpen) {
+      closeSettingsModal();
+    } else {
+      openSettingsModal();
+    }
+  });
+
+  settingsModal.addEventListener('click', event => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.dismiss === 'settings-modal') {
+      closeSettingsModal();
+    }
+  });
+
+  if (settingsModalClose) {
+    settingsModalClose.addEventListener('click', () => closeSettingsModal());
+  }
+
+  if (settingsForm) {
+    settingsForm.addEventListener('submit', handleSettingsSubmit);
+  }
+
+  difficultyInputs.forEach(input => {
+    input.addEventListener('change', handleDifficultyChange);
+  });
+
+  roleInputs.forEach(input => {
+    input.addEventListener('change', handleRoleChange);
+    const label = input.closest('label');
+    if (label) {
+      label.addEventListener('click', event => handleRoleOptionClick(event, input));
+    }
+  });
+}
+
 async function restorePlayer() {
   let stored = null;
   try {
@@ -270,9 +323,11 @@ async function restorePlayer() {
     console.warn('Failed to restore session', err);
     localStorage.removeItem('just-one-player');
     player = null;
+    shouldAutoOpenSettings = false;
   }
 
   updateLayout();
+  maybeAutoOpenSettings();
 }
 
 async function silentlyRejoin(existing) {
@@ -324,6 +379,7 @@ function onStateChange() {
         serverPlayerRecord.name !== player.name ||
         serverPlayerRecord.role !== player.role ||
         serverPlayerRecord.avatar !== player.avatar;
+      
       if (changed) {
         player = { ...player, ...serverPlayerRecord };
         localStorage.setItem('just-one-player', JSON.stringify(player));
@@ -421,6 +477,7 @@ async function handleJoinSubmit(event) {
     updateSelectedAvatar(normalizeAvatarChoice(joined.avatar));
     updateLayout();
     openSettingsModal({ auto: true });
+    maybeAutoOpenSettings();
     showMessage(`Joined as ${joined.name}`);
   } catch (err) {
     // error already surfaced by apiPost
@@ -438,8 +495,12 @@ function updateLayout() {
     controlsEl.innerHTML = '';
     roundEl.innerHTML = '';
     renderLeaderboard();
-    closeSettingsModal(true);
+    renderRoundProgress();
+    renderEndGameControls();
     renderSettingsButtonState();
+    applySettingsFormState();
+    shouldAutoOpenSettings = false;
+    closeSettingsModal(true);
     return;
   }
 
@@ -449,9 +510,13 @@ function updateLayout() {
   renderPlayerInfo();
   renderPlayers();
   renderScore();
+  renderRoundProgress();
+  renderEndGameControls();
+  renderSettingsButtonState();
   renderControls();
   renderRound();
   renderLeaderboard();
+  applySettingsFormState();
   renderSettingsButtonState();
   maybeAutoOpenSettings();
 }
@@ -484,12 +549,19 @@ function renderPlayerInfo() {
   playerInfo.appendChild(summary);
 
   const round = serverState?.round;
+  const game = serverState?.game;
   const roundStage = round?.stage ?? null;
 
   if (!round) {
     const prompt = document.createElement('div');
     prompt.className = 'info-card subtle';
-    prompt.textContent = 'Start a round to begin the fun.';
+    if (game?.gameOver) {
+      prompt.textContent = game.gameOverReason === 'completed'
+        ? `Game finished after ${game.roundsCompleted}/${game.totalRounds} rounds.`
+        : 'Game ended early by unanimous vote.';
+    } else {
+      prompt.textContent = 'Start a round to begin the fun.';
+    }
     playerInfo.appendChild(prompt);
   } else if (roundStage && roundStage !== 'round_result') {
     const notice = document.createElement('div');
@@ -558,7 +630,9 @@ function renderPlayerBadge(playerRecord) {
   if (player && player.id === playerRecord.id) {
     pill.classList.add('is-self');
   }
-
+  const voted = Boolean(playerRecord?.votedToEnd);
+  if (voted) pill.classList.add('has-voted');
+  
   const avatarEl = document.createElement('span');
   avatarEl.className = 'player-pill-avatar';
   avatarEl.textContent = playerRecord.avatar || defaultAvatar;
@@ -568,6 +642,13 @@ function renderPlayerBadge(playerRecord) {
   nameEl.className = 'player-pill-name';
   nameEl.textContent = playerRecord.name;
   pill.appendChild(nameEl);
+  
+  if (voted) {
+    const indicator = document.createElement('span');
+    indicator.className = 'player-vote-indicator';
+    indicator.textContent = '🔴';
+    pill.appendChild(indicator);
+  }
 
   return pill;
 }
@@ -578,10 +659,90 @@ function renderScore() {
     scoreboardEl.textContent = '';
     return;
   }
-  const stage = serverState.round?.stage ?? 'waiting';
-  stageIndicator.textContent = formatStage(stage);
+  const round = serverState.round;
+  const game = serverState.game;
+  if (game?.gameOver) {
+    stageIndicator.textContent = game.gameOverReason === 'completed'
+      ? 'Game finished'
+      : 'Game ended early';
+  } else {
+    const stage = round?.stage ?? 'waiting';
+    stageIndicator.textContent = formatStage(stage);
+  }
   const { success, failure } = serverState.score;
   scoreboardEl.textContent = `Score: ${success} correct · ${failure} misses`;
+}
+
+function renderRoundProgress() {
+  if (!roundProgressEl) return;
+  if (!serverState?.game) {
+    roundProgressEl.textContent = '';
+    return;
+  }
+  const { totalRounds = 0, roundsCompleted = 0 } = serverState.game;
+  if (!totalRounds) {
+    roundProgressEl.textContent = '';
+    return;
+  }
+  const roundActive = Boolean(serverState.round) && !serverState.game.gameOver;
+  const displayNumber = Math.min(totalRounds, roundActive ? roundsCompleted + 1 : roundsCompleted);
+  const label = roundActive
+    ? `Round ${displayNumber}/${totalRounds} (in progress)`
+    : `Round ${roundsCompleted}/${totalRounds}`;
+  roundProgressEl.textContent = label;
+}
+
+function renderEndGameControls() {
+  if (!endGameButton || !endGameStatus) return;
+  if (!serverState?.game) {
+    endGameButton.disabled = true;
+    endGameButton.textContent = 'End game early';
+    endGameStatus.textContent = '';
+    if (resetGameButton) resetGameButton.classList.add('hidden');
+    return;
+  }
+
+  const game = serverState.game;
+  const totalPlayers = serverState.players.length;
+  const votes = Number(game.endGameVotes?.count ?? 0);
+  const playerRecord = player ? serverState.players.find(p => p.id === player.id) : null;
+  const hasVoted = Boolean(playerRecord?.votedToEnd);
+
+  if (game.gameOver) {
+    endGameButton.disabled = true;
+    endGameButton.textContent = 'Game ended';
+    endGameStatus.textContent = game.gameOverReason === 'completed'
+      ? `All ${game.roundsCompleted}/${game.totalRounds} rounds completed.`
+      : 'Ended early by player votes.';
+    if (resetGameButton) {
+      resetGameButton.classList.remove('hidden');
+      resetGameButton.disabled = !player;
+    }
+    return;
+  }
+
+  const canVote = Boolean(player) && totalPlayers > 0;
+  endGameButton.disabled = !canVote;
+  endGameButton.textContent = hasVoted ? 'Withdraw vote' : 'End game early';
+  const baseStatus = totalPlayers > 0
+    ? `Votes to end: ${votes}/${totalPlayers}`
+    : 'Waiting for players to join.';
+  endGameStatus.textContent = canVote ? baseStatus : `${baseStatus}${player ? '' : ' (join to vote)'}`;
+  if (resetGameButton) {
+    resetGameButton.classList.add('hidden');
+  }
+}
+
+function renderSettingsButtonState() {
+  if (!settingsButton) return;
+  const canEdit = canEditSettings();
+  settingsButton.disabled = !canEdit;
+  settingsButton.title = canEdit
+    ? 'Adjust game settings'
+    : 'Settings available between rounds';
+  if (!canEdit && settingsModalOpen) {
+    closeSettingsModal(true);
+  }
 }
 
 function renderLeaderboard() {
@@ -718,11 +879,23 @@ function renderControls() {
   if (!player || !serverState) return;
 
   const round = serverState.round;
+  const game = serverState.game;
   if (!round) {
     const prompt = document.createElement('div');
-    prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
+    const gameOver = Boolean(game?.gameOver);
+    if (gameOver) {
+      const reason = game.gameOverReason === 'completed'
+        ? `Game complete after ${game.roundsCompleted}/${game.totalRounds} rounds.`
+        : 'Game ended early by unanimous vote.';
+      prompt.className = 'info-card subtle';
+      prompt.textContent = `${reason} Update settings to start a new game.`;
+    } else {
+      prompt.textContent = 'Ready to play? Anyone can kick off the first round.';
+    }
     controlsEl.appendChild(prompt);
-    controlsEl.appendChild(buildButton('Start new round', () => startRound()));
+    const startButton = buildButton('Start new round', () => startRound());
+    startButton.disabled = Boolean(game?.gameOver);
+    controlsEl.appendChild(startButton);
     return;
   }
 
@@ -799,6 +972,13 @@ function renderRound() {
     empty.textContent = 'No round in progress yet.';
     roundEl.appendChild(empty);
     return;
+  }
+
+  if (typeof round.number === 'number') {
+    const badge = document.createElement('div');
+    badge.className = 'round-number-badge';
+    badge.textContent = `Round ${round.number}`;
+    roundEl.appendChild(badge);
   }
 
   if (player.role === 'hint' && currentWord) {
@@ -1081,107 +1261,55 @@ function showMessage(text, type = 'info') {
   }, 3000);
 }
 
-async function handleInviteFriends() {
-  const value = window.location.origin;
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(value);
-      showMessage('Invite link copied to clipboard.');
-      return;
-    }
-
-    const tempInput = document.createElement('input');
-    tempInput.value = value;
-    tempInput.setAttribute('readonly', '');
-    tempInput.style.position = 'absolute';
-    tempInput.style.left = '-9999px';
-    document.body.appendChild(tempInput);
-    tempInput.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(tempInput);
-    if (ok) {
-      showMessage('Invite link copied to clipboard.');
-      return;
-    }
-    throw new Error('Copy not supported');
-  } catch (err) {
-    showMessage('Copy failed. Copy the link manually from the address bar.', 'error');
-  }
-}
-
-function setupSettings() {
-  if (!settingsButton || !settingsModal) return;
-  settingsButton.addEventListener('click', () => {
-    if (settingsModalOpen) {
-      closeSettingsModal();
-    } else {
-      openSettingsModal();
-    }
-  });
-
-  settingsModal.addEventListener('click', event => {
-    const target = event.target;
-    if (target instanceof HTMLElement && target.dataset.dismiss === 'settings-modal') {
-      closeSettingsModal();
-    }
-  });
-
-  if (settingsModalClose) {
-    settingsModalClose.addEventListener('click', () => closeSettingsModal());
-  }
-
-  difficultyInputs.forEach(input => {
-    input.addEventListener('change', handleDifficultyChange);
-  });
-
-  roleInputs.forEach(input => {
-    input.addEventListener('change', handleRoleChange);
-    const label = input.closest('label');
-    if (label) {
-      label.addEventListener('click', event => handleRoleOptionClick(event, input));
-    }
-  });
-}
-
 function openSettingsModal({ auto = false } = {}) {
-  if (!settingsModal || settingsModalOpen) return;
+  if (!settingsModal || !settingsButton) return;
+  if (!canEditSettings()) {
+    if (!auto) {
+      showMessage('Finish the current round before updating settings.', 'error');
+    }
+    return;
+  }
   settingsModal.classList.remove('hidden');
-  requestAnimationFrame(() => {
-    settingsModal.classList.add('is-visible');
-  });
+  settingsModal.classList.remove('is-hiding');
+  settingsModal.classList.add('is-visible');
   settingsModalOpen = true;
   shouldAutoOpenSettings = false;
-  if (settingsButton) {
-    settingsButton.setAttribute('aria-expanded', 'true');
-  }
+  settingsButton.setAttribute('aria-expanded', 'true');
   applySettingsFormState();
-  document.addEventListener('keydown', handleSettingsKeydown);
-  const activeInput = difficultyInputs.find(input => input.value === currentSettings.difficulty);
-  if (activeInput && !activeInput.disabled) {
-    activeInput.focus({ preventScroll: true });
-  } else if (!auto && settingsModalClose) {
-    settingsModalClose.focus({ preventScroll: true });
+  if (settingsTotalRoundsInput) {
+    settingsTotalRoundsInput.value = String(currentSettings.totalRounds ?? 10);
+    settingsTotalRoundsInput.focus({ preventScroll: true });
+    settingsTotalRoundsInput.select();
   }
+  document.addEventListener('keydown', handleSettingsKeydown);
 }
 
 function closeSettingsModal(force = false) {
-  if (!settingsModal) return;
-  if (!settingsModalOpen && !force) return;
-
-  const shouldHideImmediately = force || !settingsModalOpen;
-  settingsModalOpen = false;
-  if (settingsButton) {
-    settingsButton.setAttribute('aria-expanded', 'false');
+  if (!settingsModal || !settingsButton || !settingsModalOpen) {
+    if (force && settingsModal) {
+      settingsModal.classList.add('hidden');
+      settingsModal.classList.remove('is-visible');
+      settingsModal.classList.remove('is-hiding');
+    }
+    return;
   }
   settingsModal.classList.remove('is-visible');
-  if (shouldHideImmediately) {
+  if (force) {
     settingsModal.classList.add('hidden');
+    settingsModal.classList.remove('is-hiding');
   } else {
+    settingsModal.classList.add('is-hiding');
     window.setTimeout(() => {
       if (!settingsModalOpen) {
         settingsModal.classList.add('hidden');
+        settingsModal.classList.remove('is-hiding');
       }
-    }, 220);
+    }, 240);
+  }
+  settingsModalOpen = false;
+  settingsButton.setAttribute('aria-expanded', 'false');
+  if (!force) {
+    settingsButton.focus({ preventScroll: true });
   }
   hideRoleWarning();
   document.removeEventListener('keydown', handleSettingsKeydown);
@@ -1194,6 +1322,47 @@ function handleSettingsKeydown(event) {
   }
 }
 
+async function handleSettingsSubmit(event) {
+  event.preventDefault();
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  if (!canEditSettings()) {
+    showMessage('Finish the current round before updating settings.', 'error');
+    applySettingsFormState();
+    return;
+  }
+  if (!settingsTotalRoundsInput) return;
+  const rawValue = Number(settingsTotalRoundsInput.value);
+  const maxRounds = currentSettings.maxRounds ?? 20;
+  if (!Number.isFinite(rawValue) || rawValue < 1 || rawValue > maxRounds) {
+    showMessage(`Choose a number of rounds between 1 and ${maxRounds}.`, 'error');
+    settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    return;
+  }
+  const totalRounds = Math.round(rawValue);
+  const selectedDifficulty = difficultyInputs.find(input => input.checked)?.value === 'hard' ? 'hard' : 'easy';
+  try {
+    const response = await apiPost('/api/settings', {
+      playerId: player.id,
+      totalRounds,
+      difficulty: selectedDifficulty
+    });
+    if (typeof response.totalRounds === 'number') {
+      currentSettings.totalRounds = response.totalRounds;
+    }
+    if (typeof response.difficulty === 'string') {
+      currentSettings.difficulty = response.difficulty === 'hard' ? 'hard' : 'easy';
+    }
+    applySettingsFormState();
+    showMessage('Settings updated.');
+    closeSettingsModal();
+  } catch (err) {
+    applySettingsFormState();
+  }
+}
+
 async function handleDifficultyChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
@@ -1203,15 +1372,26 @@ async function handleDifficultyChange(event) {
     applySettingsFormState();
     return;
   }
+  if (!canEditSettings()) {
+    showMessage('Finish the current round before updating settings.', 'error');
+    applySettingsFormState();
+    return;
+  }
   if (value === currentSettings.difficulty) {
     return;
   }
   try {
-    await apiPost('/api/settings', {
+    const response = await apiPost('/api/settings', {
       playerId: player.id,
-      difficulty: value
+      difficulty: value,
+      totalRounds: currentSettings.totalRounds
     });
-    currentSettings.difficulty = value;
+    if (typeof response.difficulty === 'string') {
+      currentSettings.difficulty = response.difficulty === 'hard' ? 'hard' : 'easy';
+    }
+    if (typeof response.totalRounds === 'number') {
+      currentSettings.totalRounds = response.totalRounds;
+    }
     applySettingsFormState();
     showMessage(value === 'hard' ? 'Hard mode enabled.' : 'Easy mode enabled.');
   } catch (err) {
@@ -1260,8 +1440,7 @@ function handleRoleOptionClick(event, input) {
   if (!player) return;
   if (input.value !== 'guesser') return;
   const roundStage = serverState?.round?.stage ?? null;
-  const roundActive = Boolean(serverState?.round && roundStage !== 'round_result');
-  if (roundActive) return;
+  if (roundStage && roundStage !== 'round_result') return;
   const guesserTaken = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player.id));
   if (!guesserTaken) return;
   event.preventDefault();
@@ -1305,55 +1484,141 @@ function hideRoleWarning() {
 }
 
 function applySettingsFormState() {
-  const current = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
-  const roundStage = serverState?.round?.stage ?? null;
-  const roundActive = Boolean(serverState?.round && roundStage !== 'round_result');
+  const canEdit = canEditSettings();
+  if (settingsTotalRoundsInput) {
+    const focused = document.activeElement === settingsTotalRoundsInput;
+    if (!focused) {
+      settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    }
+    settingsTotalRoundsInput.min = '1';
+    settingsTotalRoundsInput.max = String(currentSettings.maxRounds);
+    settingsTotalRoundsInput.disabled = !canEdit;
+  }
+  const currentDifficulty = currentSettings.difficulty === 'hard' ? 'hard' : 'easy';
   difficultyInputs.forEach(input => {
-    input.checked = input.value === current;
-    input.disabled = roundActive;
+    input.checked = input.value === currentDifficulty;
+    input.disabled = !canEdit;
   });
+
+  const roundStage = serverState?.round?.stage ?? null;
+  const roundLocked = Boolean(roundStage && roundStage !== 'round_result');
   const currentRole = player?.role === 'guesser' ? 'guesser' : 'hint';
   const otherGuesserExists = Boolean(serverState?.players?.some(p => p.role === 'guesser' && p.id !== player?.id));
   roleInputs.forEach(input => {
     const isGuesser = input.value === 'guesser';
     input.checked = input.value === currentRole;
-    const disableBecauseRound = roundActive;
     const disableBecauseNoPlayer = !player;
+    const disableBecauseRound = roundLocked;
     const disableBecauseTaken = isGuesser && otherGuesserExists && currentRole !== 'guesser';
-    input.disabled = disableBecauseRound || disableBecauseNoPlayer || disableBecauseTaken;
+    input.disabled = disableBecauseNoPlayer || disableBecauseRound || disableBecauseTaken;
   });
-  if (!player || roundActive || currentRole === 'guesser' || !otherGuesserExists) {
+  if (!player || roundLocked || currentRole === 'guesser' || !otherGuesserExists) {
     hideRoleWarning();
   }
 }
 
-function syncSettingsFromServer() {
-  const serverSettings = serverState?.settings;
-  if (!serverSettings) return;
-  const difficulty = serverSettings.difficulty === 'hard' ? 'hard' : 'easy';
-  if (difficulty !== currentSettings.difficulty) {
-    currentSettings.difficulty = difficulty;
-  }
-  applySettingsFormState();
-  renderSettingsButtonState();
-}
-
-function renderSettingsButtonState() {
-  if (!settingsButton) return;
-  settingsButton.disabled = !player;
-  settingsButton.title = player
-    ? 'Adjust game settings'
-    : 'Join the table to edit settings';
-}
-
 function maybeAutoOpenSettings() {
-  if (player && shouldAutoOpenSettings && !settingsModalOpen) {
-    openSettingsModal({ auto: true });
+  if (!shouldAutoOpenSettings) return;
+  if (!player) return;
+  if (settingsModalOpen) return;
+  if (!canEditSettings()) return;
+  openSettingsModal({ auto: true });
+}
+
+function syncSettingsFromServer() {
+  const game = serverState?.game;
+  const settings = serverState?.settings;
+  if (!game && !settings) return;
+  const nextTotal = Number.isFinite(game?.totalRounds) ? Number(game.totalRounds) : currentSettings.totalRounds;
+  const nextMax = Number.isFinite(game?.maxRounds) ? Number(game.maxRounds) : currentSettings.maxRounds;
+  const nextDifficulty = settings?.difficulty === 'hard'
+    ? 'hard'
+    : settings?.difficulty === 'easy'
+      ? 'easy'
+      : currentSettings.difficulty;
+  const changed = nextTotal !== currentSettings.totalRounds
+    || nextMax !== currentSettings.maxRounds
+    || nextDifficulty !== currentSettings.difficulty;
+  currentSettings = {
+    totalRounds: nextTotal,
+    maxRounds: nextMax,
+    difficulty: nextDifficulty
+  };
+  if (settingsTotalRoundsInput) {
+    settingsTotalRoundsInput.max = String(currentSettings.maxRounds);
+    if (changed && settingsModalOpen) {
+      settingsTotalRoundsInput.value = String(currentSettings.totalRounds);
+    }
+  }
+}
+
+function canEditSettings() {
+  return Boolean(player) && !serverState?.round;
+}
+
+async function handleEndGameToggle() {
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  if (!serverState?.game) return;
+  if (serverState.game.gameOver) {
+    showMessage('Game already ended.', 'error');
+    return;
+  }
+
+  const playerRecord = serverState.players.find(p => p.id === player.id);
+  const hasVoted = Boolean(playerRecord?.votedToEnd);
+  try {
+    await apiPost('/api/game/end-vote', {
+      playerId: player.id,
+      vote: !hasVoted
+    });
+    showMessage(!hasVoted ? 'Vote recorded.' : 'Vote withdrawn.');
+  } catch (err) {
+    // message surfaced
+  }
+}
+
+async function handleInviteFriends() {
+  const value = window.location.origin;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(value);
+      showMessage('Invite link copied to clipboard.');
+      return;
+    }
+
+    const tempInput = document.createElement('input');
+    tempInput.value = value;
+    tempInput.setAttribute('readonly', '');
+    tempInput.style.position = 'absolute';
+    tempInput.style.left = '-9999px';
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(tempInput);
+    if (ok) {
+      showMessage('Invite link copied to clipboard.');
+      return;
     }
     throw new Error('Copy not supported');
   } catch (err) {
     showMessage('Copy failed. Copy the link manually from the address bar.', 'error');
   }
+}
+
+async function handleResetGame() {
+  if (!player) {
+    showMessage('Join the table first.', 'error');
+    return;
+  }
+  try {
+    await apiPost('/api/game/reset', { playerId: player.id });
+    showMessage('Game reset. Ready for a new round.');
+    shouldAutoOpenSettings = false;
+    updateLayout();
+  } catch (err) {}
 }
 
 async function handleLeaveTable() {

@@ -20,6 +20,7 @@
           <span>Name</span>
           <input id="name-input" type="text" required maxlength="24" autocomplete="off" />
         </label>
+
         <div id="avatar-field" class="avatar-field">
           <span class="avatar-field-label">Avatar</span>
           <button type="button" id="avatar-picker-button" class="avatar-picker-button" aria-haspopup="dialog" aria-expanded="false">
@@ -27,6 +28,7 @@
           </button>
           <input id="avatar-input" type="hidden" name="avatar" />
         </div>
+
         <label>
           <span>Role</span>
           <select id="role-select">
@@ -35,6 +37,7 @@
             <option value="hint">Hint giver</option>
           </select>
         </label>
+
         <button type="submit">Join</button>
       </form>
       <p class="hint">There can be only one guesser at a time.</p>
@@ -66,12 +69,16 @@
           <div class="status-bar">
             <div id="stage-indicator"></div>
             <div id="scoreboard"></div>
+            <div class="round-tracker">
+              <div id="round-progress"></div>
+              <button type="button" id="end-game-button">End game early</button>
+              <div id="end-game-status" class="end-game-status"></div>
+              <button type="button" id="reset-game-button" class="reset-game-button hidden">Start new game</button>
+            </div>
           </div>
 
           <section id="players"></section>
-
           <section id="controls"></section>
-
           <section id="round"></section>
         </div>
       </div>
@@ -80,18 +87,30 @@
     <div id="messages"></div>
   </main>
 
+  <!-- Template for hint lists -->
   <template id="hint-list-template">
     <ul class="hint-list"></ul>
   </template>
 
+  <!-- Settings modal -->
   <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
     <div class="settings-modal-backdrop" data-dismiss="settings-modal"></div>
     <div class="settings-modal-panel" role="document">
+      <button type="button" id="settings-modal-close" class="settings-modal-close" aria-label="Close settings" data-dismiss="settings-modal">×</button>
+
       <form id="settings-form" class="settings-form">
-        <header class="settings-header">
-          <h3 id="settings-modal-title">Game settings</h3>
-          <button type="button" id="settings-modal-close" class="settings-modal-close" aria-label="Close settings">×</button>
-        </header>
+        <h3 id="settings-modal-title">Game settings</h3>
+        <p class="settings-subtitle">Adjust the table before the next round begins.</p>
+
+        <fieldset class="settings-fieldset">
+          <legend>Game length</legend>
+          <label for="settings-total-rounds">
+            <span>Total rounds per game</span>
+            <input type="number" id="settings-total-rounds" name="totalRounds" min="1" max="20" step="1" required />
+          </label>
+          <p class="settings-hint">Choose between 1 and 20 rounds. Settings apply once saved and the next round starts.</p>
+        </fieldset>
+
         <fieldset class="settings-fieldset">
           <legend>Difficulty</legend>
           <label class="settings-option">
@@ -103,7 +122,9 @@
             <span>Hard mode</span>
           </label>
         </fieldset>
+
         <p class="settings-description">Hard mode blocks proper nouns and multi-word hints.</p>
+
         <fieldset class="settings-fieldset">
           <legend>Change role</legend>
           <p class="settings-note">Switch roles between rounds. Only one guesser can be active.</p>
@@ -117,7 +138,13 @@
             <span>Give hints</span>
           </label>
         </fieldset>
+
+        <button type="submit" class="settings-save">Save settings</button>
       </form>
+    </div>
+  </div>
+
+  <!-- Avatar picker modal -->
   <div id="avatar-modal" class="avatar-modal hidden" role="dialog" aria-modal="true" aria-labelledby="avatar-modal-title">
     <div class="avatar-modal-backdrop" data-dismiss="avatar-modal"></div>
     <div class="avatar-modal-panel" role="document">
