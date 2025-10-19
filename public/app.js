@@ -87,7 +87,9 @@ const hintTypingState = {
 const hintDraft = {
   roundId: null,
   value: '',
-  syncedValue: ''
+  syncedValue: '',
+  isEditing: false,
+  shouldFocus: false
 };
 const GUESS_TYPING_IDLE_DELAY = 1800;
 const guessTypingState = {
@@ -1011,6 +1013,8 @@ function resetHintDraft() {
   hintDraft.roundId = null;
   hintDraft.value = '';
   hintDraft.syncedValue = '';
+  hintDraft.isEditing = false;
+  hintDraft.shouldFocus = false;
 }
 
 function markGuessTypingActivity() {
@@ -1467,6 +1471,8 @@ function renderRound() {
       hintDraft.roundId = roundIdentifier;
       hintDraft.syncedValue = serverValue;
       hintDraft.value = serverValue;
+      hintDraft.isEditing = !serverValue;
+      hintDraft.shouldFocus = !serverValue;
     } else if (existingHint) {
       const wasSynced = hintDraft.value === hintDraft.syncedValue;
       hintDraft.syncedValue = serverValue;
@@ -1474,10 +1480,9 @@ function renderRound() {
         hintDraft.value = serverValue;
       }
     } else {
-      const wasSynced = hintDraft.value === hintDraft.syncedValue;
-      hintDraft.syncedValue = '';
-      if (wasSynced) {
-        hintDraft.value = '';
+      if (!hintDraft.value && !hintDraft.syncedValue && !hintDraft.isEditing) {
+        hintDraft.isEditing = true;
+        hintDraft.shouldFocus = true;
       }
     }
   } else if (isHintPlayer && hintDraft.roundId !== roundIdentifier) {
@@ -1485,9 +1490,13 @@ function renderRound() {
     hintDraft.roundId = roundIdentifier;
     hintDraft.syncedValue = fallbackValue;
     hintDraft.value = fallbackValue;
+    hintDraft.isEditing = false;
+    hintDraft.shouldFocus = false;
   }
 
   if (isHintPlayer && (playerLocked || stage !== 'collecting_hints')) {
+    hintDraft.isEditing = false;
+    hintDraft.shouldFocus = false;
     stopHintTypingImmediate({ notify: true });
   }
 
@@ -1548,24 +1557,58 @@ function renderRound() {
 
         const ownHint = hint.playerId === player.id;
         const canEditHint = ownHint && isHintPlayer && stage === 'collecting_hints' && !playerLocked;
+        const isEditing = canEditHint && hintDraft.isEditing;
+        const instructionText = 'Double click to enter your hint!';
+        const rawHintText = ownHint
+          ? (hintDraft.value || hintDraft.syncedValue || hint.text || '')
+          : (hint.text || '');
+        const hintText = rawHintText.trim();
 
         if (canEditHint) {
           const form = document.createElement('form');
           form.className = 'hint-inline-form';
+
+          const displayWrap = document.createElement('div');
+          displayWrap.className = 'hint-inline-display';
+          if (canEditHint) {
+            displayWrap.classList.add('can-edit');
+          }
+          const displaySpan = document.createElement('span');
+          displaySpan.textContent = hintText || instructionText;
+          if (!hintText) {
+            displayWrap.classList.add('is-empty');
+          }
+          displayWrap.appendChild(displaySpan);
+
           const input = document.createElement('input');
           input.type = 'text';
           input.name = 'clue';
           input.maxLength = 32;
-          input.placeholder = 'Single word';
+          input.placeholder = instructionText;
           input.autocomplete = 'off';
           input.value = hintDraft.value;
-          form.appendChild(input);
+          input.className = 'hint-inline-input';
 
           const submitButton = document.createElement('button');
           submitButton.type = 'submit';
           submitButton.className = 'hint-inline-submit';
-          submitButton.textContent = 'Submit';
-          form.appendChild(submitButton);
+          submitButton.textContent = '(submit)';
+          submitButton.disabled = !canEditHint;
+
+          if (isEditing) {
+            displayWrap.classList.add('is-hidden');
+          } else {
+            input.classList.add('is-hidden');
+          }
+
+          displayWrap.addEventListener('dblclick', () => {
+            if (!canEditHint) return;
+            hintDraft.roundId = roundIdentifier;
+            hintDraft.value = hintText ? rawHintText : '';
+            hintDraft.isEditing = true;
+            hintDraft.shouldFocus = true;
+            renderRound();
+          });
 
           form.addEventListener('submit', async evt => {
             evt.preventDefault();
@@ -1580,7 +1623,10 @@ function renderRound() {
             stopHintTypingImmediate({ notify: true });
             await submitHint(value);
             hintDraft.syncedValue = value;
+            hintDraft.isEditing = false;
+            hintDraft.shouldFocus = false;
             input.value = value;
+            renderRound();
           });
 
           input.addEventListener('input', () => {
@@ -1591,18 +1637,49 @@ function renderRound() {
 
           input.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
 
+          form.appendChild(displayWrap);
+          form.appendChild(input);
+          form.appendChild(submitButton);
           row.appendChild(form);
-          clueInputForFocus = input;
-        } else {
-          const textEl = document.createElement('div');
-          textEl.className = 'hint-text';
-          if (canSeeText || ownHint) {
-            textEl.textContent = hint.text || '';
-          } else {
-            textEl.textContent = 'Hidden';
-            textEl.classList.add('hint-text-obscured');
+
+          if (isEditing) {
+            clueInputForFocus = input;
           }
-          row.appendChild(textEl);
+        } else {
+          if (ownHint) {
+            const form = document.createElement('form');
+            form.className = 'hint-inline-form is-static';
+            form.setAttribute('aria-disabled', 'true');
+
+            const displayWrap = document.createElement('div');
+            displayWrap.className = 'hint-inline-display';
+            const displaySpan = document.createElement('span');
+            displaySpan.textContent = hintText || instructionText;
+            if (!hintText) {
+              displayWrap.classList.add('is-empty');
+            }
+            displayWrap.appendChild(displaySpan);
+
+            const submitButton = document.createElement('button');
+            submitButton.type = 'button';
+            submitButton.className = 'hint-inline-submit';
+            submitButton.textContent = '(submit)';
+            submitButton.disabled = true;
+
+            form.appendChild(displayWrap);
+            form.appendChild(submitButton);
+            row.appendChild(form);
+          } else {
+            const textEl = document.createElement('div');
+            textEl.className = 'hint-text';
+            if (canSeeText || ownHint) {
+              textEl.textContent = hintText || '';
+            } else {
+              textEl.textContent = 'Hidden';
+              textEl.classList.add('hint-text-obscured');
+            }
+            row.appendChild(textEl);
+          }
         }
 
         content.appendChild(row);
@@ -1671,7 +1748,24 @@ function renderRound() {
       roundEl.appendChild(list);
 
       if (clueInputForFocus) {
-        restoreClueFocus(clueInputForFocus, clueFocusState);
+        if (clueFocusState.shouldRestore) {
+          restoreClueFocus(clueInputForFocus, clueFocusState);
+          hintDraft.shouldFocus = false;
+        } else if (hintDraft.shouldFocus) {
+          window.requestAnimationFrame(() => {
+            if (clueInputForFocus.readOnly || clueInputForFocus.disabled) {
+              hintDraft.shouldFocus = false;
+              return;
+            }
+            clueInputForFocus.focus({ preventScroll: true });
+            clueInputForFocus.select();
+            hintDraft.shouldFocus = false;
+          });
+        } else {
+          hintDraft.shouldFocus = false;
+        }
+      } else {
+        hintDraft.shouldFocus = false;
       }
 
       if (isHintPlayer && playerLocked && stage === 'collecting_hints') {
