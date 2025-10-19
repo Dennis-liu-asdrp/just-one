@@ -355,7 +355,7 @@ function handleInstructionsKeydown(event) {
 function maybeAutoOpenInstructions() {
   if (!shouldAutoOpenInstructions) return;
   if (instructionsModalOpen) return;
-  if (!player) return;
+  if (player) return;
 
   openInstructionsModal();
 }
