@@ -123,6 +123,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/hints/typing' && req.method === 'POST') {
+    await handleTypingHint(req, res);
+    return;
+  }
+
   if (pathname === '/api/round/begin-review' && req.method === 'POST') {
     await handleBeginReview(req, res);
     return;
@@ -361,7 +366,9 @@ async function handleStartRound(req, res) {
       revealedAt: null,
       finishedAt: null,
       statsApplied: false,
-      number: state.roundsCompleted + 1
+      number: state.roundsCompleted + 1,
+      reviewLocks: new Set(),
+      typingHints: new Set()
     };
 
     respond(res, 200, { roundId: state.round.id, wordAvailable: true });
@@ -388,6 +395,12 @@ async function handleSubmitHint(req, res) {
 
     if (player.role !== 'hint') {
       respond(res, 403, { error: 'Only hint-givers can submit hints' });
+      return;
+    }
+
+    const reviewLocks = getRoundReviewLockSet();
+    if (reviewLocks.has(player.id)) {
+      respond(res, 423, { error: 'Your hint is locked for review' });
       return;
     }
 
@@ -423,6 +436,9 @@ async function handleSubmitHint(req, res) {
       });
     }
 
+    const typingHints = getRoundTypingSet();
+    typingHints.delete(player.id);
+
     respond(res, 200, { success: true });
     broadcastState();
   } catch (err) {
@@ -434,11 +450,6 @@ async function handleBeginReview(req, res) {
   try {
     if (!state.round || state.round.stage !== 'collecting_hints') {
       respond(res, 409, { error: 'Cannot move to review right now' });
-      return;
-    }
-
-    if (state.round.hints.length === 0) {
-      respond(res, 400, { error: 'Submit at least one hint before review' });
       return;
     }
 
@@ -454,9 +465,73 @@ async function handleBeginReview(req, res) {
       return;
     }
 
-    state.round.stage = 'reviewing_hints';
-    state.round.reviewStartedAt = Date.now();
-    respond(res, 200, { success: true });
+    if (state.round.hints.length === 0) {
+      respond(res, 400, { error: 'Submit at least one hint before review' });
+      return;
+    }
+
+    const playerHint = state.round.hints.find(h => h.playerId === player.id);
+    if (!playerHint) {
+      respond(res, 400, { error: 'Submit a hint before reviewing collisions' });
+      return;
+    }
+
+    const reviewLocks = getRoundReviewLockSet();
+    const alreadyLocked = reviewLocks.has(player.id);
+    if (!alreadyLocked) {
+      reviewLocks.add(player.id);
+    }
+
+    getRoundTypingSet().delete(player.id);
+
+    const reviewStageChanged = maybeEnterReviewStage();
+    const readyToReview = state.round.stage === 'reviewing_hints' || reviewStageChanged;
+
+    respond(res, 200, { success: true, readyToReview, alreadyLocked });
+    broadcastState();
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
+async function handleTypingHint(req, res) {
+  try {
+    if (!state.round) {
+      respond(res, 409, { error: 'No active round' });
+      return;
+    }
+
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    if (player.role !== 'hint') {
+      respond(res, 403, { error: 'Only hint-givers can set typing status' });
+      return;
+    }
+
+    const typing = Boolean(body.typing);
+    const typingHints = getRoundTypingSet();
+    const reviewLocks = getRoundReviewLockSet(false);
+
+    if (state.round.stage !== 'collecting_hints' || (reviewLocks && reviewLocks.has(player.id))) {
+      typingHints.delete(player.id);
+      respond(res, 200, { success: true, typing: false });
+      broadcastState();
+      return;
+    }
+
+    if (typing) {
+      typingHints.add(player.id);
+    } else {
+      typingHints.delete(player.id);
+    }
+
+    respond(res, 200, { success: true, typing: typingHints.has(player.id) });
     broadcastState();
   } catch (err) {
     respond(res, 400, { error: err.message });
@@ -484,6 +559,7 @@ async function handleReveal(req, res) {
 
     state.round.stage = 'awaiting_guess';
     state.round.revealedAt = Date.now();
+    getRoundTypingSet().clear();
 
     respond(res, 200, { success: true });
     broadcastState();
@@ -829,6 +905,11 @@ function removePlayer(playerId) {
   state.endGameVotes.delete(playerId);
   if (state.round) {
     state.round.hints = state.round.hints.filter(h => h.playerId !== playerId);
+    const locks = getRoundReviewLockSet(false);
+    locks.delete(playerId);
+    const typingHints = getRoundTypingSet(false);
+    typingHints.delete(playerId);
+    maybeEnterReviewStage();
     if (state.round.guess && state.round.guess.playerId === playerId) {
       state.round.guess = null;
     }
@@ -874,6 +955,85 @@ function getPlayerAvatar(playerId) {
   return player?.avatar || defaultAvatar;
 }
 
+function getRoundReviewLockSet(createIfMissing = true) {
+  if (!state.round) return new Set();
+  const current = state.round.reviewLocks;
+  if (current instanceof Set) {
+    return current;
+  }
+  if (Array.isArray(current)) {
+    const set = new Set(current);
+    if (createIfMissing) {
+      state.round.reviewLocks = set;
+    }
+    return set;
+  }
+  if (!current) {
+    if (createIfMissing) {
+      const set = new Set();
+      state.round.reviewLocks = set;
+      return set;
+    }
+    return new Set();
+  }
+  const set = new Set(Array.from(current));
+  if (createIfMissing) {
+    state.round.reviewLocks = set;
+  }
+  return set;
+}
+
+function getRoundTypingSet(createIfMissing = true) {
+  if (!state.round) return new Set();
+  const current = state.round.typingHints;
+  if (current instanceof Set) {
+    return current;
+  }
+  if (Array.isArray(current)) {
+    const set = new Set(current);
+    if (createIfMissing) {
+      state.round.typingHints = set;
+    }
+    return set;
+  }
+  if (!current) {
+    if (createIfMissing) {
+      const set = new Set();
+      state.round.typingHints = set;
+      return set;
+    }
+    return new Set();
+  }
+  const set = new Set(Array.from(current));
+  if (createIfMissing) {
+    state.round.typingHints = set;
+  }
+  return set;
+}
+
+function allHintGiversLocked() {
+  if (!state.round) return false;
+  const locks = getRoundReviewLockSet(false);
+  if (locks.size === 0) return false;
+  const hintPlayers = state.players.filter(p => p.role === 'hint');
+  if (hintPlayers.length === 0) return false;
+  return hintPlayers.every(player => {
+    const contributed = state.round.hints.some(hint => hint.playerId === player.id);
+    return contributed && locks.has(player.id);
+  });
+}
+
+function maybeEnterReviewStage() {
+  if (!state.round) return false;
+  if (state.round.stage !== 'collecting_hints') return false;
+  if (!state.round.hints.length) return false;
+  if (!allHintGiversLocked()) return false;
+  state.round.stage = 'reviewing_hints';
+  state.round.reviewStartedAt = Date.now();
+  getRoundTypingSet().clear();
+  return true;
+}
+
 function shuffle(list) {
   const array = [...list];
   for (let i = array.length - 1; i > 0; i -= 1) {
@@ -917,6 +1077,8 @@ function serializeState() {
           invalid: hint.invalid,
           avatar: hint.avatar || getPlayerAvatar(hint.playerId)
         })),
+        reviewLocks: Array.from(getRoundReviewLockSet(false)),
+        typingHints: Array.from(getRoundTypingSet(false)),
         guess: state.round.guess
           ? {
               playerId: state.round.guess.playerId,
