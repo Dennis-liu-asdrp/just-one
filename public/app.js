@@ -84,6 +84,33 @@ const hintTypingState = {
   reported: false,
   timeoutId: null
 };
+const hintDraft = {
+  roundId: null,
+  value: '',
+  syncedValue: '',
+  isEditing: false,
+  shouldFocus: false
+};
+const GUESS_TYPING_IDLE_DELAY = 1800;
+const guessTypingState = {
+  active: false,
+  reported: false,
+  timeoutId: null
+};
+const guessDraft = {
+  roundId: null,
+  stage: null,
+  value: '',
+  shouldFocus: false,
+  selectionStart: 0,
+  selectionEnd: 0,
+  selectionDirection: 'none'
+};
+
+const guessControlsState = {
+  form: null,
+  input: null
+};
 
 init();
 
@@ -116,6 +143,110 @@ function init() {
   setupButtonFeedback();
   maybeAutoOpenInstructions();
   renderSettingsButtonState();
+}
+
+async function simulateRandomClickAway(excludeElement) {
+  if (typeof document === 'undefined' || !document.body) return;
+  const viewportWidth = window.innerWidth || document.documentElement?.clientWidth;
+  const viewportHeight = window.innerHeight || document.documentElement?.clientHeight;
+  if (!viewportWidth || !viewportHeight) return;
+
+  const rect = typeof excludeElement?.getBoundingClientRect === 'function'
+    ? excludeElement.getBoundingClientRect()
+    : null;
+  const attempts = 12;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const clientX = Math.random() * viewportWidth;
+    const clientY = Math.random() * viewportHeight;
+    if (rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+      continue;
+    }
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target || target === excludeElement || (excludeElement && excludeElement.contains(target))) {
+      continue;
+    }
+    await dispatchSyntheticClick(target, Math.round(clientX), Math.round(clientY));
+    return;
+  }
+
+  if (excludeElement && typeof excludeElement.blur === 'function') {
+    excludeElement.blur();
+  }
+  await new Promise(resolve => requestAnimationFrame(resolve));
+
+  async function dispatchSyntheticClick(target, clientX, clientY) {
+    const baseEventInit = {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      screenX: (window.screenX || 0) + clientX,
+      screenY: (window.screenY || 0) + clientY,
+      button: 0
+    };
+
+    if (typeof PointerEvent === 'function') {
+      const pointerDown = new PointerEvent('pointerdown', {
+        ...baseEventInit,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true
+      });
+      target.dispatchEvent(pointerDown);
+      const pointerUp = new PointerEvent('pointerup', {
+        ...baseEventInit,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true
+      });
+      target.dispatchEvent(pointerUp);
+    } else {
+      const mouseDown = new MouseEvent('mousedown', baseEventInit);
+      target.dispatchEvent(mouseDown);
+      const mouseUp = new MouseEvent('mouseup', baseEventInit);
+      target.dispatchEvent(mouseUp);
+    }
+
+    const click = new MouseEvent('click', baseEventInit);
+    target.dispatchEvent(click);
+
+    await new Promise(resolve => requestAnimationFrame(resolve));
+  }
+}
+
+function captureClueFocusState() {
+  const active = document.activeElement;
+  if ((active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) && active.name === 'clue') {
+    const selectionStart = typeof active.selectionStart === 'number' ? active.selectionStart : active.value.length;
+    const selectionEnd = typeof active.selectionEnd === 'number' ? active.selectionEnd : selectionStart;
+    const selectionDirection = typeof active.selectionDirection === 'string' ? active.selectionDirection : 'none';
+    return {
+      shouldRestore: true,
+      selectionStart,
+      selectionEnd,
+      selectionDirection
+    };
+  }
+  return { shouldRestore: false };
+}
+
+function restoreClueFocus(inputEl, focusState) {
+  if (!focusState?.shouldRestore) return;
+  const isTextArea = inputEl instanceof HTMLTextAreaElement;
+  const isInput = inputEl instanceof HTMLInputElement;
+  if (!isTextArea && !isInput) return;
+  if (inputEl.readOnly || inputEl.disabled) return;
+  inputEl.focus({ preventScroll: true });
+  try {
+    inputEl.setSelectionRange(
+      focusState.selectionStart,
+      focusState.selectionEnd,
+      focusState.selectionDirection
+    );
+  } catch (err) {
+    // Ignore selection errors (e.g., input detached).
+  }
 }
 
 function setupAvatarPicker() {
@@ -503,6 +634,22 @@ function onStateChange() {
     stopHintTypingImmediate({ notify: true });
   }
 
+  if (!round || stage !== 'collecting_hints' || player?.role !== 'hint') {
+    resetHintDraft();
+  }
+
+  if (player?.role === 'guesser') {
+    if (!round || stage !== 'awaiting_guess') {
+      stopGuessTypingImmediate({ notify: true });
+    }
+  } else {
+    stopGuessTypingImmediate({ notify: true });
+  }
+
+  if (!round || stage !== 'awaiting_guess' || player?.role !== 'guesser') {
+    resetGuessDraft();
+  }
+
   if (player && serverState && !serverState.players.some(p => p.id === player.id)) {
     player = null;
     localStorage.removeItem('just-one-player');
@@ -778,6 +925,7 @@ function renderPlayerBadge(playerRecord, round = null) {
 
   const reviewLocks = Array.isArray(round?.reviewLocks) ? round.reviewLocks : [];
   const typingHints = Array.isArray(round?.typingHints) ? round.typingHints : [];
+  const guesserTyping = Array.isArray(round?.guesserTyping) ? round.guesserTyping : [];
   const isReady = reviewLocks.includes(playerRecord.id);
   if (isReady && playerRecord.role === 'hint') {
     pill.classList.add('is-ready');
@@ -800,13 +948,22 @@ function renderPlayerBadge(playerRecord, round = null) {
     pill.appendChild(indicator);
   }
 
-  const showTyping = Boolean(
+  const isHintTyping = Boolean(
     round &&
     playerRecord.role === 'hint' &&
     round.stage === 'collecting_hints' &&
     typingHints.includes(playerRecord.id) &&
     !reviewLocks.includes(playerRecord.id)
   );
+
+  const isGuesserTyping = Boolean(
+    round &&
+    playerRecord.role === 'guesser' &&
+    round.stage === 'awaiting_guess' &&
+    guesserTyping.includes(playerRecord.id)
+  );
+
+  const showTyping = isHintTyping || isGuesserTyping;
 
   if (showTyping) {
     pill.appendChild(buildTypingIndicator());
@@ -861,6 +1018,167 @@ function stopHintTypingImmediate({ notify = false } = {}) {
   }
 }
 
+function resetHintDraft() {
+  hintDraft.roundId = null;
+  hintDraft.value = '';
+  hintDraft.syncedValue = '';
+  hintDraft.isEditing = false;
+  hintDraft.shouldFocus = false;
+}
+
+function markGuessTypingActivity() {
+  if (!player || player.role !== 'guesser') return;
+  const round = serverState?.round;
+  if (!round || round.stage !== 'awaiting_guess') return;
+  if (guessTypingState.timeoutId) {
+    window.clearTimeout(guessTypingState.timeoutId);
+    guessTypingState.timeoutId = null;
+  }
+  const wasActive = guessTypingState.active;
+  guessTypingState.active = true;
+  guessTypingState.timeoutId = window.setTimeout(() => {
+    guessTypingState.timeoutId = null;
+    guessTypingState.active = false;
+    void sendGuessTypingState(false);
+  }, GUESS_TYPING_IDLE_DELAY);
+  if (!wasActive || guessTypingState.reported !== true) {
+    void sendGuessTypingState(true);
+  }
+}
+
+function stopGuessTypingImmediate({ notify = false } = {}) {
+  if (guessTypingState.timeoutId) {
+    window.clearTimeout(guessTypingState.timeoutId);
+    guessTypingState.timeoutId = null;
+  }
+  const shouldNotify = notify || guessTypingState.active || guessTypingState.reported === true;
+  guessTypingState.active = false;
+  if (shouldNotify) {
+    void sendGuessTypingState(false);
+  }
+}
+
+function updateGuessDraftSelection(input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  const valueLength = input.value.length;
+  const rawStart = typeof input.selectionStart === 'number' ? input.selectionStart : valueLength;
+  const rawEnd = typeof input.selectionEnd === 'number' ? input.selectionEnd : rawStart;
+  const start = Math.max(0, Math.min(rawStart, valueLength));
+  const end = Math.max(start, Math.min(rawEnd, valueLength));
+  guessDraft.selectionStart = start;
+  guessDraft.selectionEnd = end;
+  guessDraft.selectionDirection = typeof input.selectionDirection === 'string' ? input.selectionDirection : 'none';
+}
+
+function restoreGuessSelection(input) {
+  if (!(input instanceof HTMLInputElement)) return;
+  const valueLength = input.value.length;
+  const start = Math.max(0, Math.min(guessDraft.selectionStart, valueLength));
+  const end = Math.max(start, Math.min(guessDraft.selectionEnd, valueLength));
+  const direction = typeof guessDraft.selectionDirection === 'string' ? guessDraft.selectionDirection : 'none';
+  try {
+    input.setSelectionRange(start, end, direction);
+  } catch (err) {
+    try {
+      const cursor = input.value.length;
+      input.setSelectionRange(cursor, cursor);
+    } catch (err2) {}
+  }
+}
+
+function resetGuessDraft() {
+  guessDraft.roundId = null;
+  guessDraft.stage = null;
+  guessDraft.value = '';
+  guessDraft.shouldFocus = false;
+  guessDraft.selectionStart = 0;
+  guessDraft.selectionEnd = 0;
+  guessDraft.selectionDirection = 'none';
+}
+
+function handleGuessInputFocus(event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  const round = serverState?.round;
+  if (round && round.stage === 'awaiting_guess') {
+    guessDraft.roundId = round.id ?? guessDraft.roundId;
+    guessDraft.stage = 'awaiting_guess';
+  }
+  guessDraft.shouldFocus = true;
+  updateGuessDraftSelection(input);
+}
+
+function handleGuessInputInput(event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  const round = serverState?.round;
+  if (round) {
+    guessDraft.roundId = round.id ?? guessDraft.roundId;
+    guessDraft.stage = round.stage ?? guessDraft.stage;
+  }
+  guessDraft.value = input.value;
+  guessDraft.shouldFocus = true;
+  updateGuessDraftSelection(input);
+  markGuessTypingActivity();
+}
+
+function handleGuessInputSelectionChange(event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  updateGuessDraftSelection(input);
+}
+
+function handleGuessInputBlur(event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  updateGuessDraftSelection(input);
+  window.setTimeout(() => {
+    const active = document.activeElement;
+    if (!controlsEl.contains(active)) {
+      guessDraft.shouldFocus = false;
+    }
+  }, 0);
+  stopGuessTypingImmediate({ notify: true });
+}
+
+async function handleGuessFormSubmit(event) {
+  event.preventDefault();
+  const input = guessControlsState.input;
+  if (!(input instanceof HTMLInputElement)) return;
+
+  const round = serverState?.round;
+  const roundIdentifier = round?.id ?? null;
+  const rawValue = input.value;
+  const guess = rawValue.trim();
+
+  if (!guess) {
+    showMessage('Enter a guess first.', 'error');
+    guessDraft.shouldFocus = true;
+    restoreGuessSelection(input);
+    return;
+  }
+
+  guessDraft.roundId = roundIdentifier;
+  guessDraft.stage = 'awaiting_guess';
+  guessDraft.value = guess;
+  updateGuessDraftSelection(input);
+  stopGuessTypingImmediate({ notify: true });
+
+  try {
+    await submitGuess(guess);
+    guessDraft.value = '';
+    guessDraft.selectionStart = 0;
+    guessDraft.selectionEnd = 0;
+    guessDraft.selectionDirection = 'none';
+    guessDraft.shouldFocus = true;
+    input.value = '';
+    restoreGuessSelection(input);
+  } catch (err) {
+    guessDraft.value = input.value;
+    updateGuessDraftSelection(input);
+  }
+}
+
 async function sendHintTypingState(active) {
   if (!player) return;
   if (!serverState?.round) return;
@@ -870,6 +1188,18 @@ async function sendHintTypingState(active) {
     hintTypingState.reported = active;
   } catch (err) {
     hintTypingState.reported = null;
+  }
+}
+
+async function sendGuessTypingState(active) {
+  if (!player) return;
+  if (!serverState?.round) return;
+  if (guessTypingState.reported === active) return;
+  try {
+    await apiPost('/api/guess/typing', { playerId: player.id, typing: active }, { silent: true });
+    guessTypingState.reported = active;
+  } catch (err) {
+    guessTypingState.reported = null;
   }
 }
 
@@ -1095,11 +1425,23 @@ function renderLeaderboard() {
 }
 
 function renderControls() {
-  controlsEl.innerHTML = '';
-  if (!player || !serverState) return;
+  if (!player || !serverState) {
+    teardownGuessControls();
+    controlsEl.innerHTML = '';
+    return;
+  }
 
   const round = serverState.round;
   const game = serverState.game;
+
+  if (player.role === 'guesser' && round && round.stage === 'awaiting_guess') {
+    renderGuessControls(round);
+    return;
+  }
+
+  teardownGuessControls();
+  controlsEl.innerHTML = '';
+
   if (!round) {
     const prompt = document.createElement('div');
     const gameOver = Boolean(game?.gameOver);
@@ -1143,29 +1485,7 @@ function renderControls() {
       }
       break;
     case 'awaiting_guess':
-      if (player.role === 'guesser') {
-        const form = document.createElement('form');
-        form.className = 'guess-form';
-        form.innerHTML = `
-          <label>
-            <span>Your guess</span>
-            <input type="text" name="guess" autocomplete="off" required />
-          </label>
-          <button type="submit">Submit guess</button>
-        `;
-        form.addEventListener('submit', async evt => {
-          evt.preventDefault();
-          const formData = new FormData(form);
-          const guess = (formData.get('guess') || '').toString().trim();
-          if (!guess) {
-            showMessage('Enter a guess first.', 'error');
-            return;
-          }
-          await submitGuess(guess);
-          form.reset();
-        });
-        controlsEl.appendChild(form);
-      } else if (player.role !== 'hint') {
+      if (player.role !== 'hint') {
         setControlsMessage('Waiting for the guesser to decide.');
       } else {
         controlsEl.innerHTML = '';
@@ -1183,6 +1503,85 @@ function renderControls() {
   }
 }
 
+function renderGuessControls(round) {
+  const roundIdentifier = round?.id ?? null;
+
+  if (guessDraft.roundId !== roundIdentifier || guessDraft.stage !== 'awaiting_guess') {
+    guessDraft.roundId = roundIdentifier;
+    guessDraft.stage = 'awaiting_guess';
+    guessDraft.selectionStart = Math.min(guessDraft.selectionStart, guessDraft.value.length);
+    guessDraft.selectionEnd = Math.min(guessDraft.selectionEnd, guessDraft.value.length);
+    guessDraft.selectionDirection = guessDraft.selectionDirection || 'none';
+    guessDraft.shouldFocus = true;
+  }
+
+  let { form, input } = guessControlsState;
+
+  if (!form || !input) {
+    form = document.createElement('form');
+    form.className = 'guess-form';
+
+    const label = document.createElement('label');
+    const labelText = document.createElement('span');
+    labelText.textContent = 'Your guess';
+    const field = document.createElement('input');
+    field.type = 'text';
+    field.name = 'guess';
+    field.autocomplete = 'off';
+    field.required = true;
+    label.appendChild(labelText);
+    label.appendChild(field);
+    form.appendChild(label);
+
+    const submit = document.createElement('button');
+    submit.type = 'submit';
+    submit.textContent = 'Submit guess';
+    form.appendChild(submit);
+
+    field.addEventListener('focus', handleGuessInputFocus);
+    field.addEventListener('input', handleGuessInputInput);
+    field.addEventListener('keydown', handleGuessInputSelectionChange);
+    field.addEventListener('keyup', handleGuessInputSelectionChange);
+    field.addEventListener('click', handleGuessInputSelectionChange);
+    field.addEventListener('select', handleGuessInputSelectionChange);
+    field.addEventListener('blur', handleGuessInputBlur);
+    form.addEventListener('submit', handleGuessFormSubmit);
+
+    guessControlsState.form = form;
+    guessControlsState.input = field;
+    input = field;
+  }
+
+  form.dataset.roundId = roundIdentifier ? String(roundIdentifier) : '';
+  if (input.value !== guessDraft.value) {
+    input.value = guessDraft.value;
+  }
+
+  const children = Array.from(controlsEl.children);
+  for (const child of children) {
+    if (child !== form) {
+      controlsEl.removeChild(child);
+    }
+  }
+  if (form.parentElement !== controlsEl) {
+    controlsEl.appendChild(form);
+  }
+
+  if (guessDraft.shouldFocus) {
+    input.focus({ preventScroll: true });
+    restoreGuessSelection(input);
+  }
+}
+
+function teardownGuessControls() {
+  if (guessControlsState.form && guessControlsState.form.parentElement === controlsEl) {
+    controlsEl.removeChild(guessControlsState.form);
+  }
+  guessControlsState.form = null;
+  guessControlsState.input = null;
+  guessDraft.shouldFocus = false;
+}
+
 function setControlsMessage(text) {
   controlsEl.innerHTML = '';
   const card = document.createElement('div');
@@ -1192,6 +1591,7 @@ function setControlsMessage(text) {
 }
 
 function renderRound() {
+  const clueFocusState = captureClueFocusState();
   roundEl.innerHTML = '';
   if (!player || !serverState) return;
 
@@ -1220,13 +1620,50 @@ function renderRound() {
 
   const stage = round.stage;
   const reviewLocks = Array.isArray(round.reviewLocks) ? round.reviewLocks : [];
-  const playerLocked = player.role === 'hint' && reviewLocks.includes(player.id);
+  const isHintPlayer = player.role === 'hint';
+  const playerLocked = isHintPlayer && reviewLocks.includes(player.id);
+  const roundIdentifier = round.id ?? null;
+  const existingHint = isHintPlayer
+    ? round.hints.find(h => h.playerId === player.id)
+    : null;
 
-  if (player.role === 'hint' && (playerLocked || stage !== 'collecting_hints')) {
+  if (isHintPlayer && stage === 'collecting_hints') {
+    const serverValue = existingHint ? (existingHint.text || '') : '';
+    if (hintDraft.roundId !== roundIdentifier) {
+      hintDraft.roundId = roundIdentifier;
+      hintDraft.syncedValue = serverValue;
+      hintDraft.value = serverValue;
+      hintDraft.isEditing = !serverValue;
+      hintDraft.shouldFocus = !serverValue;
+    } else if (existingHint) {
+      const wasSynced = hintDraft.value === hintDraft.syncedValue;
+      hintDraft.syncedValue = serverValue;
+      if (wasSynced) {
+        hintDraft.value = serverValue;
+      }
+    } else {
+      if (!hintDraft.value && !hintDraft.syncedValue && !hintDraft.isEditing) {
+        hintDraft.isEditing = true;
+        hintDraft.shouldFocus = true;
+      }
+    }
+  } else if (isHintPlayer && hintDraft.roundId !== roundIdentifier) {
+    const fallbackValue = existingHint ? (existingHint.text || '') : '';
+    hintDraft.roundId = roundIdentifier;
+    hintDraft.syncedValue = fallbackValue;
+    hintDraft.value = fallbackValue;
+    hintDraft.isEditing = false;
+    hintDraft.shouldFocus = false;
+  }
+
+  if (isHintPlayer && (playerLocked || stage !== 'collecting_hints')) {
+    hintDraft.isEditing = false;
+    hintDraft.shouldFocus = false;
     stopHintTypingImmediate({ notify: true });
   }
 
-  if (round.hints.length > 0) {
+  const shouldShowHintList = isHintPlayer || round.hints.length > 0;
+  if (shouldShowHintList) {
     const guesserWaiting = player.role === 'guesser' && !['awaiting_guess', 'round_result'].includes(stage);
 
     if (guesserWaiting) {
@@ -1240,14 +1677,27 @@ function renderRound() {
       const list = document.createElement('ul');
       list.className = 'hint-list';
 
-      const hintPlayerCanSeeText = player.role === 'hint' && stage !== 'collecting_hints';
+      const hintPlayerCanSeeText = isHintPlayer && stage !== 'collecting_hints';
       const canSeeText = hintPlayerCanSeeText
         || stage === 'round_result'
         || (player.role === 'guesser' && stage === 'awaiting_guess');
 
-      const hintsForDisplay = player.role === 'guesser' && stage === 'awaiting_guess'
+      let hintsForDisplay = player.role === 'guesser' && stage === 'awaiting_guess'
         ? round.hints.filter(h => !h.invalid)
-        : round.hints;
+        : [...round.hints];
+
+      if (isHintPlayer && stage === 'collecting_hints' && !existingHint) {
+        hintsForDisplay.unshift({
+          id: '__draft__',
+          playerId: player.id,
+          avatar: player.avatar || defaultAvatar,
+          text: hintDraft.value || '',
+          author: player.name || 'You',
+          isDraft: true
+        });
+      }
+
+      let clueInputForFocus = null;
 
       hintsForDisplay.forEach(hint => {
         const li = document.createElement('li');
@@ -1267,16 +1717,112 @@ function renderRound() {
         avatarEl.textContent = hint.avatar || defaultAvatar;
         row.appendChild(avatarEl);
 
-        const textEl = document.createElement('div');
-        textEl.className = 'hint-text';
         const ownHint = hint.playerId === player.id;
-        if (canSeeText || ownHint) {
-          textEl.textContent = hint.text || '';
+        const canEditHint = ownHint && isHintPlayer && stage === 'collecting_hints' && !playerLocked;
+        const isEditing = canEditHint && hintDraft.isEditing;
+        const instructionText = 'Double click to enter your hint!';
+        const rawHintText = ownHint
+          ? (hintDraft.value || hintDraft.syncedValue || hint.text || '')
+          : (hint.text || '');
+        const hintText = rawHintText.trim();
+
+        if (canEditHint) {
+          const form = document.createElement('form');
+          form.className = 'hint-inline-form';
+
+          const displayWrap = document.createElement('div');
+          displayWrap.className = 'hint-inline-display';
+          if (canEditHint) {
+            displayWrap.classList.add('can-edit');
+          }
+          const displaySpan = document.createElement('span');
+          displaySpan.textContent = hintText || instructionText;
+          if (!hintText) {
+            displayWrap.classList.add('is-empty');
+          }
+          displayWrap.appendChild(displaySpan);
+
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.name = 'clue';
+          input.maxLength = 32;
+          input.placeholder = instructionText;
+          input.autocomplete = 'off';
+          input.value = hintDraft.value;
+          input.className = 'hint-inline-input';
+
+          if (isEditing) {
+            displayWrap.classList.add('is-hidden');
+          } else {
+            input.classList.add('is-hidden');
+          }
+
+          displayWrap.addEventListener('dblclick', () => {
+            if (!canEditHint) return;
+            hintDraft.roundId = roundIdentifier;
+            hintDraft.value = hintText ? rawHintText : '';
+            hintDraft.isEditing = true;
+            hintDraft.shouldFocus = true;
+            renderRound();
+          });
+
+          form.addEventListener('submit', async evt => {
+            evt.preventDefault();
+            await simulateRandomClickAway(input);
+            const value = input.value.trim();
+            if (!value) {
+              showMessage('Clue cannot be empty.', 'error');
+              return;
+            }
+            hintDraft.roundId = roundIdentifier;
+            hintDraft.value = value;
+            stopHintTypingImmediate({ notify: true });
+            await submitHint(value);
+            hintDraft.syncedValue = value;
+            hintDraft.isEditing = false;
+            hintDraft.shouldFocus = false;
+            input.value = value;
+            renderRound();
+          });
+
+          input.addEventListener('input', () => {
+            hintDraft.roundId = roundIdentifier;
+            hintDraft.value = input.value;
+            markHintTypingActivity();
+          });
+
+          input.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
+
+          form.appendChild(displayWrap);
+          form.appendChild(input);
+          row.appendChild(form);
+
+          if (isEditing) {
+            clueInputForFocus = input;
+          }
         } else {
-          textEl.textContent = 'Hidden';
-          textEl.classList.add('hint-text-obscured');
+          if (ownHint) {
+            const displayWrap = document.createElement('div');
+            displayWrap.className = 'hint-inline-display';
+            const displaySpan = document.createElement('span');
+            displaySpan.textContent = hintText || instructionText;
+            if (!hintText) {
+              displayWrap.classList.add('is-empty');
+            }
+            displayWrap.appendChild(displaySpan);
+            row.appendChild(displayWrap);
+          } else {
+            const textEl = document.createElement('div');
+            textEl.className = 'hint-text';
+            if (canSeeText || ownHint) {
+              textEl.textContent = hintText || '';
+            } else {
+              textEl.textContent = 'Hidden';
+              textEl.classList.add('hint-text-obscured');
+            }
+            row.appendChild(textEl);
+          }
         }
-        row.appendChild(textEl);
 
         content.appendChild(row);
 
@@ -1342,6 +1888,34 @@ function renderRound() {
       });
 
       roundEl.appendChild(list);
+
+      if (clueInputForFocus) {
+        if (clueFocusState.shouldRestore) {
+          restoreClueFocus(clueInputForFocus, clueFocusState);
+          hintDraft.shouldFocus = false;
+        } else if (hintDraft.shouldFocus) {
+          window.requestAnimationFrame(() => {
+            if (clueInputForFocus.readOnly || clueInputForFocus.disabled) {
+              hintDraft.shouldFocus = false;
+              return;
+            }
+            clueInputForFocus.focus({ preventScroll: true });
+            clueInputForFocus.select();
+            hintDraft.shouldFocus = false;
+          });
+        } else {
+          hintDraft.shouldFocus = false;
+        }
+      } else {
+        hintDraft.shouldFocus = false;
+      }
+
+      if (isHintPlayer && playerLocked && stage === 'collecting_hints') {
+        const notice = document.createElement('div');
+        notice.className = 'info-card subtle';
+        notice.textContent = 'Your hint is locked. Waiting for other hint givers.';
+        roundEl.appendChild(notice);
+      }
     }
   } else if (player.role === 'guesser' && stage !== 'round_result') {
     const placeholder = document.createElement('div');
@@ -1350,52 +1924,6 @@ function renderRound() {
       ? 'Hint givers are reviewing clues before revealing them.'
       : 'Waiting for hint givers to submit their clues.';
     roundEl.appendChild(placeholder);
-  }
-
-  if (round.stage === 'collecting_hints' && player.role === 'hint') {
-    const form = document.createElement('form');
-    form.className = 'clue-form';
-    const existing = round.hints.find(h => h.playerId === player.id);
-    form.innerHTML = `
-      <label>
-        <span>Your clue</span>
-        <textarea name="clue" maxlength="32" placeholder="Single word"></textarea>
-      </label>
-      <button type="submit">Submit clue</button>
-    `;
-    const textarea = form.querySelector('textarea');
-    const submitButton = form.querySelector('button[type="submit"]');
-    if (existing) {
-      textarea.value = existing.text;
-    }
-    if (playerLocked) {
-      textarea.readOnly = true;
-      textarea.classList.add('is-readonly');
-      if (submitButton) {
-        submitButton.disabled = true;
-      }
-      stopHintTypingImmediate({ notify: true });
-    } else {
-      form.addEventListener('submit', async evt => {
-        evt.preventDefault();
-        const value = textarea.value.trim();
-        if (!value) {
-          showMessage('Clue cannot be empty.', 'error');
-          return;
-        }
-        stopHintTypingImmediate({ notify: true });
-        await submitHint(value);
-      });
-      textarea.addEventListener('input', () => markHintTypingActivity());
-      textarea.addEventListener('blur', () => stopHintTypingImmediate({ notify: true }));
-    }
-    roundEl.appendChild(form);
-    if (playerLocked) {
-      const notice = document.createElement('div');
-      notice.className = 'info-card subtle';
-      notice.textContent = 'Your hint is locked. Waiting for other hint givers.';
-      roundEl.appendChild(notice);
-    }
   }
 
   if (round.stage === 'round_result') {
