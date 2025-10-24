@@ -1002,6 +1002,18 @@ function renderPlayerBadge(playerRecord, round = null, { canKick = false } = {})
     kickButton.title = `Remove ${playerRecord.name} before the game starts`;
     kickButton.setAttribute('aria-label', `Remove ${playerRecord.name}`);
     kickButton.textContent = 'Remove';
+    kickButton.addEventListener('mouseenter', () => {
+      pill.classList.add('suppress-hover');
+    });
+    kickButton.addEventListener('mouseleave', () => {
+      pill.classList.remove('suppress-hover');
+    });
+    kickButton.addEventListener('focus', () => {
+      pill.classList.add('suppress-hover');
+    });
+    kickButton.addEventListener('blur', () => {
+      pill.classList.remove('suppress-hover');
+    });
     pill.appendChild(kickButton);
     pill.classList.add('has-action');
   }

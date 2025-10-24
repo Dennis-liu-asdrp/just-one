@@ -1419,6 +1419,11 @@ button.pulse {
   cursor: wait;
 }
 
+.player-pill.suppress-hover:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .player-name-pill {
   display: inline-flex;
   align-items: center;
