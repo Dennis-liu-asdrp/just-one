@@ -151,6 +151,9 @@ function init() {
   if (resetGameButton) {
     resetGameButton.addEventListener('click', handleResetGame);
   }
+  if (playersEl) {
+    playersEl.addEventListener('click', handlePlayersClick);
+  }
   setupSettings();
   setupAvatarPicker();
   setupHintChat();
@@ -905,6 +908,8 @@ function renderPlayers() {
   playersEl.innerHTML = '';
   if (!serverState) return;
 
+  const allowKicks = canKickPlayers();
+
   const groups = [
     { label: 'Guesser', players: serverState.players.filter(p => p.role === 'guesser') },
     { label: 'Hint givers', players: serverState.players.filter(p => p.role === 'hint') }
@@ -925,7 +930,7 @@ function renderPlayers() {
       container.appendChild(empty);
     } else {
       group.players.forEach(record => {
-        container.appendChild(renderPlayerBadge(record, serverState.round));
+        container.appendChild(renderPlayerBadge(record, serverState.round, { canKick: allowKicks }));
       });
     }
 
@@ -933,7 +938,7 @@ function renderPlayers() {
   }
 }
 
-function renderPlayerBadge(playerRecord, round = null) {
+function renderPlayerBadge(playerRecord, round = null, { canKick = false } = {}) {
   const pill = document.createElement('span');
   pill.className = 'player-pill';
   if (player && player.id === playerRecord.id) {
@@ -988,7 +993,41 @@ function renderPlayerBadge(playerRecord, round = null) {
     pill.appendChild(buildTypingIndicator());
   }
 
+  if (canKick && player && player.id !== playerRecord.id) {
+    const kickButton = document.createElement('button');
+    kickButton.type = 'button';
+    kickButton.className = 'player-pill-kick';
+    kickButton.dataset.targetId = playerRecord.id;
+    kickButton.dataset.targetName = playerRecord.name;
+    kickButton.title = `Remove ${playerRecord.name} before the game starts`;
+    kickButton.setAttribute('aria-label', `Remove ${playerRecord.name}`);
+    kickButton.textContent = 'Remove';
+    kickButton.addEventListener('mouseenter', () => {
+      pill.classList.add('suppress-hover');
+    });
+    kickButton.addEventListener('mouseleave', () => {
+      pill.classList.remove('suppress-hover');
+    });
+    kickButton.addEventListener('focus', () => {
+      pill.classList.add('suppress-hover');
+    });
+    kickButton.addEventListener('blur', () => {
+      pill.classList.remove('suppress-hover');
+    });
+    pill.appendChild(kickButton);
+    pill.classList.add('has-action');
+  }
+
   return pill;
+}
+
+function canKickPlayers() {
+  if (!player) return false;
+  const game = serverState?.game;
+  if (!game || game.gameOver) return false;
+  if (!game.kickWindowOpen) return false;
+  const playerCount = Array.isArray(serverState?.players) ? serverState.players.length : 0;
+  return playerCount > 1;
 }
 
 function buildTypingIndicator() {
@@ -1003,6 +1042,46 @@ function buildTypingIndicator() {
     bubble.appendChild(dot);
   }
   return bubble;
+}
+
+function handlePlayersClick(event) {
+  const button = event.target instanceof HTMLElement
+    ? event.target.closest('.player-pill-kick')
+    : null;
+  if (!button || !(button instanceof HTMLButtonElement)) return;
+  event.preventDefault();
+  if (!player) {
+    showMessage('Join the table to manage players.', 'error');
+    return;
+  }
+  if (!serverState?.game?.kickWindowOpen) {
+    showMessage('Players can only be removed before the game begins.', 'error');
+    return;
+  }
+
+  const targetId = button.dataset.targetId;
+  if (!targetId) return;
+  const targetName = button.dataset.targetName || 'Player';
+
+  button.disabled = true;
+  button.classList.add('is-busy');
+  void requestPlayerKick(targetId, targetName).finally(() => {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.classList.remove('is-busy');
+    }
+  });
+}
+
+async function requestPlayerKick(targetId, targetName) {
+  if (!player) return;
+  try {
+    await apiPost('/api/player/kick', { playerId: player.id, targetId });
+    const trimmedName = targetName?.trim() ? targetName.trim() : 'Player';
+    showMessage(`${trimmedName} was removed from the lobby.`);
+  } catch (err) {
+    // Errors are surfaced via apiPost
+  }
 }
 
 function markHintTypingActivity() {

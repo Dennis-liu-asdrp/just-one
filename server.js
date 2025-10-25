@@ -100,6 +100,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/player/kick' && req.method === 'POST') {
+    await handleKickPlayer(req, res);
+    return;
+  }
+
   if (pathname === '/api/settings' && req.method === 'POST') {
     await handleUpdateSettings(req, res);
     return;
@@ -784,6 +789,49 @@ async function handleLeave(req, res) {
   }
 }
 
+async function handleKickPlayer(req, res) {
+  try {
+    if (!isKickWindowOpen()) {
+      respond(res, 409, { error: 'Players can only be removed before the game begins' });
+      return;
+    }
+
+    const body = await readBody(req);
+    const player = findPlayer(body.playerId);
+    if (!player) {
+      respond(res, 401, { error: 'Unknown player' });
+      return;
+    }
+    touchPlayer(player);
+
+    const targetId = typeof body.targetId === 'string' ? body.targetId : '';
+    if (!targetId) {
+      respond(res, 400, { error: 'Target player ID is required' });
+      return;
+    }
+    if (targetId === player.id) {
+      respond(res, 400, { error: 'You cannot remove yourself' });
+      return;
+    }
+
+    const target = findPlayer(targetId);
+    if (!target) {
+      respond(res, 404, { error: 'Player not found' });
+      return;
+    }
+
+    removePlayer(targetId);
+    if (state.players.length === 0) {
+      resetGameStateToDefaults();
+    }
+
+    respond(res, 200, { success: true });
+    broadcastState();
+  } catch (err) {
+    respond(res, 400, { error: err.message });
+  }
+}
+
 async function handleUpdateSettings(req, res) {
   try {
     const body = await readBody(req);
@@ -950,6 +998,12 @@ function evaluateEndGameVotes() {
     return true;
   }
   return false;
+}
+
+function isKickWindowOpen() {
+  if (state.round) return false;
+  if (state.roundsCompleted !== 0) return false;
+  return !state.gameOver;
 }
 
 function endGame(reason, { preserveRound = false, broadcast = true } = {}) {
@@ -1215,6 +1269,7 @@ function serializeState() {
       roundsCompleted: state.roundsCompleted,
       gameOver: state.gameOver,
       gameOverReason: state.gameOverReason,
+      kickWindowOpen: isKickWindowOpen(),
       endGameVotes: {
         voters: Array.from(state.endGameVotes),
         count: state.endGameVotes.size,
