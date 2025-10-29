@@ -1063,6 +1063,37 @@ function getRoundReviewLockSet(createIfMissing = true) {
   return set;
 }
 
+function maybeEnterReviewStage() {
+  if (!state.round || state.round.stage !== 'collecting_hints') {
+    return false;
+  }
+
+  const hintGiverIds = getHintGiverIds();
+  if (hintGiverIds.length === 0) {
+    return false;
+  }
+
+  const reviewLocks = getRoundReviewLockSet();
+  const everyoneLocked = hintGiverIds.every(id => reviewLocks.has(id));
+  if (!everyoneLocked) {
+    return false;
+  }
+
+  const hintOwners = new Set(
+    state.round.hints
+      .filter(hint => hint && typeof hint.playerId === 'string')
+      .map(hint => hint.playerId)
+  );
+  const allSubmittedHints = hintGiverIds.every(id => hintOwners.has(id));
+  if (!allSubmittedHints) {
+    return false;
+  }
+
+  state.round.stage = 'reviewing_hints';
+  getRoundTypingSet().clear();
+  return true;
+}
+
 function getRoundTypingSet(createIfMissing = true) {
   if (!state.round) return new Set();
   const current = state.round.typingHints;
