@@ -1022,33 +1022,6 @@ button.pulse {
   font-size: 0.9rem;
 }
 
-.leaderboard-toggle {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-}
-
-.leaderboard-tab {
-  background: rgba(44, 91, 240, 0.28);
-  color: var(--text-primary);
-  border: 1px solid rgba(99, 102, 241, 0.45);
-  border-radius: 999px;
-  padding: 0.5rem 0.75rem;
-  font-weight: 600;
-  transition: background 0.2s ease, color 0.2s ease, border 0.2s ease;
-}
-
-.leaderboard-tab:hover {
-  background: rgba(44, 91, 240, 0.4);
-  border-color: rgba(99, 102, 241, 0.6);
-}
-
-.leaderboard-tab.active {
-  background: #2c5bf0;
-  color: var(--text-primary);
-  border-color: #2c5bf0;
-}
-
 .leaderboard-list {
   list-style: none;
   margin: 0;

@@ -1490,7 +1490,7 @@ function buildLeaderboard() {
   const allStats = Array.from(playerStats.values());
   if (allStats.length === 0) {
     return {
-      global: [],
+      entries: [],
       byPlayer: {},
       updatedAt: Date.now()
     };
@@ -1510,22 +1510,18 @@ function buildLeaderboard() {
         roundsParticipated: stats.roundsParticipated,
         successfulRounds: stats.successfulRounds
       },
-      playerScore: metrics.playerScore,
       bestHints: stats.bestHints.slice(0, 3),
       lastUpdatedAt: stats.lastUpdatedAt
     };
   });
 
-  const sortEntries = list =>
-    list.sort((a, b) => {
-      if (b.playerScore !== a.playerScore) return b.playerScore - a.playerScore;
-      if (b.metrics.cus !== a.metrics.cus) return b.metrics.cus - a.metrics.cus;
+  const rankedEntries = entries
+    .filter(entry => entry.totals.hintsGiven > 0)
+    .sort((a, b) => {
+      if (b.metrics.hsr !== a.metrics.hsr) return b.metrics.hsr - a.metrics.hsr;
+      if (b.metrics.gar !== a.metrics.gar) return b.metrics.gar - a.metrics.gar;
       return a.name.localeCompare(b.name);
     });
-
-  const rankedEntries = entries.filter(entry => entry.totals.hintsGiven > 0);
-
-  const global = sortEntries(rankedEntries.slice());
 
   const byPlayer = {};
   for (const entry of entries) {
@@ -1533,26 +1529,19 @@ function buildLeaderboard() {
   }
 
   return {
-    global,
+    entries: rankedEntries,
     byPlayer,
     updatedAt: Date.now()
   };
 }
 
 function calculateMetrics(stats) {
-  const cusRaw = stats.usefulnessEntries === 0 ? 0 : (stats.usefulnessSum / stats.usefulnessEntries) * 100;
   const hsrRaw = stats.hintsGiven === 0 ? 0 : (stats.hintsKept / stats.hintsGiven) * 100;
   const garRaw = stats.roundsParticipated === 0 ? 0 : (stats.successfulRounds / stats.roundsParticipated) * 100;
-  const efRaw = 100 - hsrRaw;
-
-  const playerScoreRaw = (cusRaw * 0.5) + (hsrRaw * 0.3) + (garRaw * 0.2);
 
   return {
-    cus: Number(cusRaw.toFixed(1)),
     hsr: Number(hsrRaw.toFixed(1)),
-    gar: Number(garRaw.toFixed(1)),
-    ef: Number(efRaw.toFixed(1)),
-    playerScore: Number(playerScoreRaw.toFixed(1))
+    gar: Number(garRaw.toFixed(1))
   };
 }
 

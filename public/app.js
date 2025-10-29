@@ -44,7 +44,6 @@ const instructionsModal = document.getElementById('instructions-modal');
 const instructionsModalClose = document.getElementById('instructions-modal-close');
 
 
-
 const fallbackAvatars = [
   '🦊','🐼','🐸','🦄','🐝','🐢','🐧','🦁','🐙','🐨',
   '🐰','🐯','🐶','🐱','🐭','🐹','🐻','🐷','🐮','🐔',
@@ -1320,12 +1319,13 @@ function renderLeaderboard() {
   leaderboardPanel.classList.remove('hidden');
   gameColumns.classList.remove('single-column');
 
-  const entries = Array.isArray(board.global) ? board.global : [];
+  const entries = Array.isArray(board.entries) ? board.entries : [];
   leaderboardList.innerHTML = '';
 
   if (entries.length === 0) {
     const li = document.createElement('li');
     li.className = 'leaderboard-empty';
+    li.textContent = 'No hint data yet — keep those clues coming.';
     li.textContent = 'No hint data yet — keep those clues coming.';
     leaderboardList.appendChild(li);
   } else {
@@ -1345,10 +1345,8 @@ function renderLeaderboard() {
             <span>${escapeHtml(entry.name)}</span>
           </div>
           <div class="leaderboard-metrics">
-            ${renderLeaderboardMetric('🥇', 'Clue Usefulness Score', metrics.cus)}
-            ${renderLeaderboardMetric('💡', 'Hint Survival Rate', metrics.hsr)}
-            ${renderLeaderboardMetric('🎯', 'Guess Assist Rate', metrics.gar)}
-            ${renderLeaderboardMetric('🔁', 'Elimination Frequency', metrics.ef)}
+            ${renderLeaderboardMetric('🎯', '🎯Hint Survival Rate', metrics.hsr)}
+            ${renderLeaderboardMetric('💡', '💡Hint Success Rate', metrics.gar)}
           </div>
         </div>
       `;
@@ -1376,8 +1374,8 @@ function renderLeaderboard() {
 
   const summaryHtml = `
     <div class="personal-summary">
-      ${buildStatChip('Hint Survival Rate', `${formatMetricValue(metrics.hsr)}%`)}
-      ${buildStatChip('Hint Success Rate', `${formatMetricValue(metrics.gar)}%`)}
+      ${buildStatChip('🎯Hint Survival Rate', `${formatMetricValue(metrics.hsr)}%`)}
+      ${buildStatChip('💡Hint Success Rate', `${formatMetricValue(metrics.gar)}%`)}
     </div>
   `;
 
